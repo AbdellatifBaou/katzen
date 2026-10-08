@@ -1,9 +1,11 @@
-import { Expense, UserBalance, DebtSettlement } from '@/types';
+import { Expense, UserBalance, DebtSettlement, SettlementConfirmation } from '@/types';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { EXPENSE_USERS } from './constants';
 
 const LOCAL_EXPENSES_KEY = 'katzen_expenses_v1';
+const LOCAL_SETTLEMENTS_KEY = 'katzen_settlements_v1';
 
+// Fetch all expenses
 export async function fetchExpenses(): Promise<Expense[]> {
   if (isSupabaseConfigured && supabase) {
     try {
@@ -32,14 +34,16 @@ export async function fetchExpenses(): Promise<Expense[]> {
   return [];
 }
 
+// Add new expense
 export async function addExpense(params: {
   paid_by: string;
   amount: number;
   description: string;
+  customDate?: string;
 }): Promise<Expense> {
   const newExpense: Expense = {
     id: `exp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    created_at: new Date().toISOString(),
+    created_at: params.customDate || new Date().toISOString(),
     paid_by: params.paid_by,
     amount: Number(params.amount.toFixed(2)),
     description: params.description.trim() || 'Katzen-Bedarf',
@@ -74,6 +78,7 @@ export async function addExpense(params: {
   return newExpense;
 }
 
+// Remove expense
 export async function removeExpense(id: string): Promise<void> {
   if (isSupabaseConfigured && supabase) {
     try {
@@ -94,12 +99,112 @@ export async function removeExpense(id: string): Promise<void> {
   }
 }
 
-// Calculate balances and minimum settlement transactions for a list of expenses
-export function calculateSettlements(expenses: Expense[]): {
+// Fetch confirmed settlement payments
+export async function fetchSettlementConfirmations(): Promise<SettlementConfirmation[]> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('settlements')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        return data as SettlementConfirmation[];
+      }
+    } catch (e) {
+      console.error('Supabase settlements fetch error:', e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem(LOCAL_SETTLEMENTS_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  return [];
+}
+
+// Confirm that money has been transferred / received
+export async function confirmSettlementPayment(params: {
+  month: string;
+  from_user: string;
+  to_user: string;
+  amount: number;
+}): Promise<SettlementConfirmation> {
+  const newConfirmation: SettlementConfirmation = {
+    id: `settle_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    created_at: new Date().toISOString(),
+    month: params.month,
+    from_user: params.from_user,
+    to_user: params.to_user,
+    amount: Number(params.amount.toFixed(2)),
+  };
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('settlements')
+        .insert([newConfirmation])
+        .select()
+        .single();
+
+      if (!error && data) {
+        return data as SettlementConfirmation;
+      }
+    } catch (e) {
+      console.error('Supabase settlement insert error:', e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const current = await fetchSettlementConfirmations();
+      const updated = [newConfirmation, ...current];
+      localStorage.setItem(LOCAL_SETTLEMENTS_KEY, JSON.stringify(updated));
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  return newConfirmation;
+}
+
+// Delete confirmation (undo)
+export async function removeSettlementConfirmation(id: string): Promise<void> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase.from('settlements').delete().eq('id', id);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const current = await fetchSettlementConfirmations();
+      const filtered = current.filter((item) => item.id !== id);
+      localStorage.setItem(LOCAL_SETTLEMENTS_KEY, JSON.stringify(filtered));
+    } catch (e) {
+      console.error(e);
+    }
+  }
+}
+
+// Calculate settlements taking month and confirmations into account
+export function calculateSettlements(
+  expenses: Expense[],
+  monthKey: string,
+  confirmedSettlements: SettlementConfirmation[] = []
+): {
   total: number;
   perPerson: number;
   balances: UserBalance[];
-  settlements: DebtSettlement[];
+  openSettlements: DebtSettlement[];
+  paidSettlements: DebtSettlement[];
 } {
   const total = Number(expenses.reduce((sum, e) => sum + Number(e.amount), 0).toFixed(2));
   const memberCount = EXPENSE_USERS.length; // 5 people (excluding Lennart)
@@ -129,9 +234,7 @@ export function calculateSettlements(expenses: Expense[]): {
     };
   });
 
-  // Calculate who owes whom (debt settlement algorithm)
-  // Positive balance = creditor (should receive money)
-  // Negative balance = debtor (needs to pay money)
+  // Calculate debt settlements
   const debtors: { user: string; amount: number }[] = [];
   const creditors: { user: string; amount: number }[] = [];
 
@@ -143,7 +246,7 @@ export function calculateSettlements(expenses: Expense[]): {
     }
   }
 
-  const settlements: DebtSettlement[] = [];
+  const allCalculated: DebtSettlement[] = [];
 
   let dIdx = 0;
   let cIdx = 0;
@@ -155,7 +258,10 @@ export function calculateSettlements(expenses: Expense[]): {
     const settledAmount = Math.min(debtor.amount, creditor.amount);
 
     if (settledAmount > 0.01) {
-      settlements.push({
+      const settlementKey = `${monthKey}_${debtor.user}_${creditor.user}`;
+      allCalculated.push({
+        id: settlementKey,
+        month: monthKey,
         from: debtor.user,
         to: creditor.user,
         amount: Number(settledAmount.toFixed(2)),
@@ -169,5 +275,31 @@ export function calculateSettlements(expenses: Expense[]): {
     if (creditor.amount <= 0.01) cIdx++;
   }
 
-  return { total, perPerson, balances, settlements };
+  // Match against confirmations for this month
+  const monthConfirmations = confirmedSettlements.filter((c) => c.month === monthKey);
+
+  const openSettlements: DebtSettlement[] = [];
+  const paidSettlements: DebtSettlement[] = [];
+
+  for (const item of allCalculated) {
+    const foundConf = monthConfirmations.find(
+      (c) => c.from_user === item.from && c.to_user === item.to
+    );
+
+    if (foundConf) {
+      paidSettlements.push({
+        ...item,
+        id: foundConf.id, // for undoing
+        isPaid: true,
+        paid_at: foundConf.created_at,
+      });
+    } else {
+      openSettlements.push({
+        ...item,
+        isPaid: false,
+      });
+    }
+  }
+
+  return { total, perPerson, balances, openSettlements, paidSettlements };
 }

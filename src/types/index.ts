@@ -16,8 +16,21 @@ export interface Expense {
 }
 
 export interface DebtSettlement {
+  id: string;
+  month: string; // e.g. "2026-10"
   from: string;
   to: string;
+  amount: number;
+  isPaid?: boolean;
+  paid_at?: string;
+}
+
+export interface SettlementConfirmation {
+  id: string;
+  created_at: string;
+  month: string; // "2026-10"
+  from_user: string;
+  to_user: string;
   amount: number;
 }
 

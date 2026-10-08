@@ -1,28 +1,52 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { FeedingLog, FeedingType, Expense } from '@/types';
+import { FeedingLog, FeedingType, Expense, SettlementConfirmation } from '@/types';
 import { USERS, EXPENSE_USERS, CAT_NAMES } from '@/lib/constants';
 import { fetchFeedings, addFeeding, removeFeeding } from '@/lib/feedingStore';
-import { fetchExpenses, addExpense, removeExpense, calculateSettlements } from '@/lib/expenseStore';
+import {
+  fetchExpenses,
+  addExpense,
+  removeExpense,
+  fetchSettlementConfirmations,
+  confirmSettlementPayment,
+  removeSettlementConfirmation,
+  calculateSettlements,
+} from '@/lib/expenseStore';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { format, isToday, parseISO, differenceInDays } from 'date-fns';
+import { format, isToday, parseISO, differenceInDays, addMonths, subMonths } from 'date-fns';
 import { de } from 'date-fns/locale';
 import confetti from 'canvas-confetti';
 import { playMeowSound } from '@/lib/sound';
-import { Plus, Trash2, X, RotateCcw, Volume2, VolumeX, Sparkles, Receipt, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  X,
+  RotateCcw,
+  Volume2,
+  VolumeX,
+  Receipt,
+  ArrowRight,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  Undo2,
+} from 'lucide-react';
 
 export default function SimpleCatFeeder() {
   const [activeTab, setActiveTab] = useState<'feeding' | 'expenses'>('feeding');
-  
+
   // Feeding state
   const [feedings, setFeedings] = useState<FeedingLog[]>([]);
   const [selectedType, setSelectedType] = useState<FeedingType | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
-  // Expenses state
+  // Expenses & Settlement state
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [settlements, setSettlements] = useState<SettlementConfirmation[]>([]);
+  const [selectedMonthDate, setSelectedMonthDate] = useState<Date>(new Date());
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseDesc, setExpenseDesc] = useState('');
@@ -56,7 +80,7 @@ export default function SimpleCatFeeder() {
 
   // Load all data
   const loadData = useCallback(async () => {
-    // Load feedings (last 7 days)
+    // 1. Load feedings (last 7 days)
     const feedData = await fetchFeedings();
     const now = new Date();
     const last7DaysData = feedData.filter((item) => {
@@ -69,9 +93,12 @@ export default function SimpleCatFeeder() {
     });
     setFeedings(last7DaysData);
 
-    // Load expenses
+    // 2. Load expenses & settlements
     const expData = await fetchExpenses();
     setExpenses(expData);
+
+    const settData = await fetchSettlementConfirmations();
+    setSettlements(settData);
   }, []);
 
   useEffect(() => {
@@ -80,7 +107,7 @@ export default function SimpleCatFeeder() {
     // Supabase realtime subscriptions
     if (isSupabaseConfigured && supabase) {
       const channel = supabase
-        .channel('realtime_all')
+        .channel('realtime_all_tables')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'feedings' },
@@ -104,6 +131,19 @@ export default function SimpleCatFeeder() {
             } else if (payload.eventType === 'DELETE') {
               const delId = (payload.old as { id: string }).id;
               setExpenses((prev) => prev.filter((i) => i.id !== delId));
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'settlements' },
+          (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newRecord = payload.new as SettlementConfirmation;
+              setSettlements((prev) => [newRecord, ...prev.filter((i) => i.id !== newRecord.id)]);
+            } else if (payload.eventType === 'DELETE') {
+              const delId = (payload.old as { id: string }).id;
+              setSettlements((prev) => prev.filter((i) => i.id !== delId));
             }
           }
         )
@@ -204,7 +244,7 @@ export default function SimpleCatFeeder() {
       });
 
       setExpenses((prev) => [newExp, ...prev.filter((i) => i.id !== newExp.id)]);
-      
+
       confetti({
         particleCount: 35,
         spread: 50,
@@ -226,18 +266,51 @@ export default function SimpleCatFeeder() {
     }
   };
 
-  // Calculate settlements for current month
-  const currentMonthExpenses = expenses.filter((e) => {
+  // Settlement Confirmations (Als bezahlt markieren / rückgängig machen)
+  const currentMonthKey = format(selectedMonthDate, 'yyyy-MM');
+
+  const handleConfirmPayment = async (fromUser: string, toUser: string, amount: number) => {
+    if (confirm(`Bestätigen, dass ${fromUser} ${amount.toFixed(2)} € an ${toUser} bezahlt hat?`)) {
+      const conf = await confirmSettlementPayment({
+        month: currentMonthKey,
+        from_user: fromUser,
+        to_user: toUser,
+        amount,
+      });
+      setSettlements((prev) => [conf, ...prev.filter((s) => s.id !== conf.id)]);
+      confetti({
+        particleCount: 40,
+        spread: 60,
+        origin: { y: 0.7 },
+      });
+    }
+  };
+
+  const handleUndoPayment = async (confirmationId: string) => {
+    if (confirm('Zahlungsbestätigung wirklich rückgängig machen?')) {
+      await removeSettlementConfirmation(confirmationId);
+      setSettlements((prev) => prev.filter((s) => s.id !== confirmationId));
+    }
+  };
+
+  // Filter expenses by selected month
+  const selectedMonthExpenses = expenses.filter((e) => {
     try {
       const expDate = parseISO(e.created_at);
-      const now = new Date();
-      return expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear();
+      return (
+        expDate.getMonth() === selectedMonthDate.getMonth() &&
+        expDate.getFullYear() === selectedMonthDate.getFullYear()
+      );
     } catch {
-      return true;
+      return false;
     }
   });
 
-  const settlementData = calculateSettlements(currentMonthExpenses);
+  const settlementData = calculateSettlements(
+    selectedMonthExpenses,
+    currentMonthKey,
+    settlements
+  );
 
   const getTypeLabel = (type: FeedingType) => {
     if (type === 'nass') return 'Nassfutter';
@@ -500,9 +573,7 @@ export default function SimpleCatFeeder() {
                                 von {item.user_name}
                               </span>
                             </div>
-                            <span className="text-[11px] text-slate-400">
-                              {time} Uhr
-                            </span>
+                            <span className="text-[11px] text-slate-400">{time} Uhr</span>
                           </div>
                         </div>
 
@@ -525,12 +596,42 @@ export default function SimpleCatFeeder() {
         {/* ================= TAB 2: KATZEN-KASSE & AUSGABEN ================= */}
         {activeTab === 'expenses' && (
           <div className="space-y-4 animate-fadeIn">
-            {/* MONTH TOTAL CARD */}
+            {/* MONTH SWITCHER HEADER */}
+            <div className="flex items-center justify-between bg-white dark:bg-slate-900 p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+              <button
+                onClick={() => setSelectedMonthDate((prev) => subMonths(prev, 1))}
+                className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all"
+                title="Vorheriger Monat"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+
+              <div className="text-center">
+                <span className="text-sm font-black text-slate-900 dark:text-white block">
+                  {format(selectedMonthDate, 'MMMM yyyy', { locale: de })}
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">
+                  {format(selectedMonthDate, 'yyyy-MM') === format(new Date(), 'yyyy-MM')
+                    ? 'Aktueller Monat'
+                    : 'Vergangener Monat (Archiv)'}
+                </span>
+              </div>
+
+              <button
+                onClick={() => setSelectedMonthDate((prev) => addMonths(prev, 1))}
+                className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all"
+                title="Nächster Monat"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* MONTH TOTAL BANNER */}
             <div className="bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-3xl p-5 shadow-md">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-100 flex items-center gap-1.5">
                   <Receipt className="w-4 h-4" />
-                  Katzen-Ausgaben ({format(new Date(), 'MMMM yyyy', { locale: de })})
+                  Monats-Übersicht
                 </span>
                 <span className="text-[11px] bg-white/20 px-2 py-0.5 rounded-full font-medium">
                   5 Personen (ohne Lennart)
@@ -541,7 +642,7 @@ export default function SimpleCatFeeder() {
                 <div>
                   <p className="text-3xl font-black">{settlementData.total.toFixed(2)} €</p>
                   <p className="text-xs text-emerald-100 font-medium mt-0.5">
-                    Gesamtausgaben diesen Monat
+                    Gesamtausgaben in {format(selectedMonthDate, 'MMMM', { locale: de })}
                   </p>
                 </div>
                 <div className="text-right">
@@ -559,40 +660,91 @@ export default function SimpleCatFeeder() {
               </button>
             </div>
 
-            {/* WHO OWES WHOM (ABRECHNUNG) */}
+            {/* WHO OWES WHOM (ABRECHNUNG & BEZAHL-BESTÄTIGUNG) */}
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                <span>🔄</span> Wer schuldet wem was? (Abrechnung)
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <span>🔄</span> Wer schuldet wem was?
+                </h3>
+              </div>
 
-              {settlementData.settlements.length === 0 ? (
+              {/* 1. Offene Schulden */}
+              {settlementData.openSettlements.length === 0 ? (
                 <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center gap-3">
                   <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                   <p className="text-xs font-medium text-emerald-900 dark:text-emerald-200">
-                    Alles ausgeglichen! Aktuell hat niemand Schulden oder es wurden noch keine Ausgaben erfasst.
+                    {settlementData.total === 0
+                      ? 'Keine Ausgaben in diesem Monat vorhanden.'
+                      : 'Alle Schulden für diesen Monat sind vollständig bezahlt & ausgeglichen! 🎉'}
                   </p>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {settlementData.settlements.map((s, idx) => (
+                  <p className="text-[11px] text-slate-400 font-medium">Offene Überweisungen:</p>
+                  {settlementData.openSettlements.map((s) => (
                     <div
-                      key={idx}
-                      className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between"
+                      key={s.id}
+                      className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-2 shadow-xs"
                     >
-                      <div className="flex items-center gap-2 text-xs font-bold">
-                        <span className="text-rose-600 dark:text-rose-400">{s.from}</span>
-                        <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-                        <span className="text-emerald-600 dark:text-emerald-400">{s.to}</span>
+                      <div>
+                        <div className="flex items-center gap-2 text-xs font-bold">
+                          <span className="text-rose-600 dark:text-rose-400">{s.from}</span>
+                          <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                          <span className="text-emerald-600 dark:text-emerald-400">{s.to}</span>
+                        </div>
+                        <span className="text-sm font-black text-slate-900 dark:text-white">
+                          {s.amount.toFixed(2)} €
+                        </span>
                       </div>
-                      <span className="text-sm font-black text-slate-900 dark:text-white">
-                        {s.amount.toFixed(2)} €
-                      </span>
+
+                      {/* Pay / Settle Button */}
+                      <button
+                        onClick={() => handleConfirmPayment(s.from, s.to, s.amount)}
+                        className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                        title="Zahlung bestätigen"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Bezahlt</span>
+                      </button>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* Individual Balances */}
+              {/* 2. Bereits beglichene Zahlungen */}
+              {settlementData.paidSettlements.length > 0 && (
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                  <p className="text-[11px] text-slate-400 font-bold flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                    Bereits beglichene Zahlungen ({settlementData.paidSettlements.length}):
+                  </p>
+                  <div className="space-y-1.5">
+                    {settlementData.paidSettlements.map((s) => (
+                      <div
+                        key={s.id}
+                        className="px-3 py-2 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/60 flex items-center justify-between text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                            ✓ {s.from} ➜ {s.to}: {s.amount.toFixed(2)} €
+                          </span>
+                          <span className="text-[10px] text-slate-400">(Erhalten)</span>
+                        </div>
+
+                        <button
+                          onClick={() => handleUndoPayment(s.id)}
+                          className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
+                          title="Rückgängig machen"
+                        >
+                          <Undo2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 3. Salden-Übersicht */}
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
                 <p className="text-[11px] font-bold text-slate-400 mb-2">Salden-Übersicht:</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -634,19 +786,19 @@ export default function SimpleCatFeeder() {
               </div>
             </div>
 
-            {/* EXPENSES HISTORY */}
+            {/* EXPENSES HISTORY FOR SELECTED MONTH */}
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Einkäufe diesen Monat ({currentMonthExpenses.length})
+                Einkäufe im {format(selectedMonthDate, 'MMMM yyyy', { locale: de })} ({selectedMonthExpenses.length})
               </h3>
 
-              {currentMonthExpenses.length === 0 ? (
+              {selectedMonthExpenses.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-4">
-                  Noch keine Einkäufe in diesem Monat erfasst.
+                  Keine Einkäufe in diesem Monat erfasst.
                 </p>
               ) : (
                 <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                  {currentMonthExpenses.map((exp) => {
+                  {selectedMonthExpenses.map((exp) => {
                     let dateStr = '';
                     try {
                       dateStr = format(parseISO(exp.created_at), 'd. MMM, HH:mm', { locale: de });
