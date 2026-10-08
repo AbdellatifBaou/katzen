@@ -1,12 +1,6 @@
-export type FeedingType = 'nass' | 'trocken' | 'leckerli';
+export type FeedingType = 'nass' | 'trocken' | 'leckerli' | 'klo';
 
-export interface FeedingLog {
-  id: string;
-  created_at: string;
-  user_name: string;
-  type: FeedingType;
-}
-
+// All 6 members participate in cat care (feeding & toilet)
 export const USERS = [
   'Latif',
   'Wiame',
@@ -14,6 +8,15 @@ export const USERS = [
   'Adiana',
   'Romy',
   'Lennart',
+];
+
+// 5 members share cat costs (Lennart is excluded from expenses)
+export const EXPENSE_USERS = [
+  'Latif',
+  'Wiame',
+  'Karam',
+  'Adiana',
+  'Romy',
 ];
 
 export const CAT_NAMES = 'Mimi • Miscu • Luna';
