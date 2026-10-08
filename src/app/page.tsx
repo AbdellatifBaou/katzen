@@ -8,12 +8,39 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { format, isToday, parseISO, differenceInDays } from 'date-fns';
 import { de } from 'date-fns/locale';
 import confetti from 'canvas-confetti';
-import { Plus, Trash2, X, RotateCcw } from 'lucide-react';
+import { playMeowSound } from '@/lib/sound';
+import { Plus, Trash2, X, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 
 export default function SimpleCatFeeder() {
   const [feedings, setFeedings] = useState<FeedingLog[]>([]);
   const [selectedType, setSelectedType] = useState<FeedingType | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // Load sound setting
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('katzen_sound_enabled');
+      if (saved !== null) {
+        setSoundEnabled(saved === 'true');
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    try {
+      localStorage.setItem('katzen_sound_enabled', String(next));
+    } catch {
+      // ignore
+    }
+    if (next) {
+      playMeowSound();
+    }
+  };
 
   // Load feedings & filter automatically for 7-day cycle
   const loadData = useCallback(async () => {
@@ -100,6 +127,10 @@ export default function SimpleCatFeeder() {
       const newEntry = await addFeeding(selectedType, userName);
       setFeedings((prev) => [newEntry, ...prev.filter((i) => i.id !== newEntry.id)]);
 
+      if (soundEnabled) {
+        playMeowSound();
+      }
+
       confetti({
         particleCount: 35,
         spread: 50,
@@ -156,10 +187,23 @@ export default function SimpleCatFeeder() {
             </p>
           </div>
 
-          <div className="text-right">
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-              {format(new Date(), 'd. MMMM', { locale: de })}
-            </span>
+          <div className="flex items-center gap-2">
+            {/* Miau Sound Toggle */}
+            <button
+              onClick={toggleSound}
+              className={`p-2 rounded-full border transition-all active:scale-95 ${
+                soundEnabled
+                  ? 'bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-950/60 dark:border-orange-800 dark:text-orange-400'
+                  : 'bg-slate-100 border-slate-200 text-slate-400 dark:bg-slate-800 dark:border-slate-700'
+              }`}
+              title={soundEnabled ? 'Miau-Ton: An' : 'Ton: Aus'}
+            >
+              {soundEnabled ? (
+                <Volume2 className="w-4 h-4" />
+              ) : (
+                <VolumeX className="w-4 h-4" />
+              )}
+            </button>
           </div>
         </div>
       </header>
