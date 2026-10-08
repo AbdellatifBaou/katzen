@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { FeedingLog, FeedingType, Expense, SettlementConfirmation } from '@/types';
-import { USERS, EXPENSE_USERS, CAT_NAMES } from '@/lib/constants';
+import { USERS, EXPENSE_USERS, CAT_NAMES, USER_PINS } from '@/lib/constants';
 import { fetchFeedings, addFeeding, removeFeeding } from '@/lib/feedingStore';
 import {
   fetchExpenses,
@@ -32,14 +32,24 @@ import {
   ChevronRight,
   Check,
   Undo2,
+  LogOut,
+  Lock,
+  User,
+  Delete,
 } from 'lucide-react';
 
 export default function SimpleCatFeeder() {
+  // Auth state (PIN Login)
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+
+  // Tabs
   const [activeTab, setActiveTab] = useState<'feeding' | 'expenses'>('feeding');
 
   // Feeding state
   const [feedings, setFeedings] = useState<FeedingLog[]>([]);
-  const [selectedType, setSelectedType] = useState<FeedingType | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
@@ -50,18 +60,27 @@ export default function SimpleCatFeeder() {
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseDesc, setExpenseDesc] = useState('');
-  const [expensePayer, setExpensePayer] = useState<string>(EXPENSE_USERS[0]);
+  const [expensePayer, setExpensePayer] = useState<string>('Latif');
   const [expenseSubmitting, setExpenseSubmitting] = useState(false);
 
-  // Load sound preference
+  // Load saved user & sound settings on mount
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('katzen_sound_enabled');
-      if (saved !== null) {
-        setSoundEnabled(saved === 'true');
+      const savedUser = localStorage.getItem('katzen_auth_user');
+      if (savedUser && USERS.includes(savedUser)) {
+        setCurrentUser(savedUser);
+        if (EXPENSE_USERS.includes(savedUser)) {
+          setExpensePayer(savedUser);
+        }
+      }
+      const savedSound = localStorage.getItem('katzen_sound_enabled');
+      if (savedSound !== null) {
+        setSoundEnabled(savedSound === 'true');
       }
     } catch {
       // ignore
+    } finally {
+      setIsAuthLoading(false);
     }
   }, []);
 
@@ -78,9 +97,60 @@ export default function SimpleCatFeeder() {
     }
   };
 
+  // Handle PIN Input & Login
+  const handlePinDigit = (digit: string) => {
+    if (pinInput.length >= 2) return;
+    const newPin = pinInput + digit;
+    setPinInput(newPin);
+    setPinError(false);
+
+    if (newPin.length === 2) {
+      const matchedUser = USER_PINS[newPin];
+      if (matchedUser) {
+        setCurrentUser(matchedUser);
+        if (EXPENSE_USERS.includes(matchedUser)) {
+          setExpensePayer(matchedUser);
+        }
+        try {
+          localStorage.setItem('katzen_auth_user', matchedUser);
+        } catch {
+          // ignore
+        }
+        setPinInput('');
+        confetti({
+          particleCount: 40,
+          spread: 60,
+          origin: { y: 0.7 },
+        });
+      } else {
+        setPinError(true);
+        setTimeout(() => {
+          setPinInput('');
+          setPinError(false);
+        }, 800);
+      }
+    }
+  };
+
+  const handlePinDelete = () => {
+    setPinInput((prev) => prev.slice(0, -1));
+    setPinError(false);
+  };
+
+  const handleLogout = () => {
+    if (confirm('Möchtest du dich abmelden / PIN wechseln?')) {
+      setCurrentUser(null);
+      setPinInput('');
+      try {
+        localStorage.removeItem('katzen_auth_user');
+      } catch {
+        // ignore
+      }
+    }
+  };
+
   // Load all data
   const loadData = useCallback(async () => {
-    // 1. Load feedings (last 7 days)
     const feedData = await fetchFeedings();
     const now = new Date();
     const last7DaysData = feedData.filter((item) => {
@@ -93,7 +163,6 @@ export default function SimpleCatFeeder() {
     });
     setFeedings(last7DaysData);
 
-    // 2. Load expenses & settlements
     const expData = await fetchExpenses();
     setExpenses(expData);
 
@@ -104,7 +173,6 @@ export default function SimpleCatFeeder() {
   useEffect(() => {
     loadData();
 
-    // Supabase realtime subscriptions
     if (isSupabaseConfigured && supabase) {
       const channel = supabase
         .channel('realtime_all_tables')
@@ -186,12 +254,12 @@ export default function SimpleCatFeeder() {
   const leckerliStats = getStats('leckerli');
   const kloStats = getStats('klo');
 
-  // Submit feeding/toilet action
-  const handleApproveFeeding = async (userName: string) => {
-    if (!selectedType || isSubmitting) return;
+  // 1-TAP Instant Feeding/Cleaning with logged-in user!
+  const handleInstantFeed = async (type: FeedingType) => {
+    if (!currentUser || isSubmitting) return;
     try {
       setIsSubmitting(true);
-      const newEntry = await addFeeding(selectedType, userName);
+      const newEntry = await addFeeding(type, currentUser);
       setFeedings((prev) => [newEntry, ...prev.filter((i) => i.id !== newEntry.id)]);
 
       if (soundEnabled) {
@@ -203,8 +271,6 @@ export default function SimpleCatFeeder() {
         spread: 50,
         origin: { y: 0.8 },
       });
-
-      setSelectedType(null);
     } finally {
       setIsSubmitting(false);
     }
@@ -226,7 +292,7 @@ export default function SimpleCatFeeder() {
     }
   };
 
-  // Submit new expense
+  // Submit expense
   const handleAddExpenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const amountNum = parseFloat(expenseAmount.replace(',', '.'));
@@ -266,7 +332,7 @@ export default function SimpleCatFeeder() {
     }
   };
 
-  // Settlement Confirmations (Als bezahlt markieren / rückgängig machen)
+  // Confirm / Undo Settlement Payment
   const currentMonthKey = format(selectedMonthDate, 'yyyy-MM');
 
   const handleConfirmPayment = async (fromUser: string, toUser: string, amount: number) => {
@@ -326,21 +392,113 @@ export default function SimpleCatFeeder() {
     return '🧹';
   };
 
+  // ================= 1. PIN LOGIN SCREEN =================
+  if (isAuthLoading) {
+    return null;
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-xs space-y-6 text-center">
+          {/* Top Cat Icon */}
+          <div className="space-y-2">
+            <div className="w-16 h-16 mx-auto rounded-3xl bg-gradient-to-tr from-orange-500 to-amber-500 flex items-center justify-center text-3xl shadow-lg shadow-orange-500/30">
+              🐱
+            </div>
+            <h1 className="text-xl font-black tracking-tight">{CAT_NAMES}</h1>
+            <p className="text-xs text-slate-400 font-medium">
+              Gib deinen 2-stelligen PIN ein:
+            </p>
+          </div>
+
+          {/* PIN Display Bubbles */}
+          <div className="flex justify-center items-center gap-4 py-2">
+            <div
+              className={`w-6 h-6 rounded-full border-2 transition-all ${
+                pinInput.length >= 1
+                  ? 'bg-orange-500 border-orange-500 scale-110'
+                  : 'border-slate-600 bg-slate-800'
+              } ${pinError ? 'bg-rose-500 border-rose-500 animate-bounce' : ''}`}
+            />
+            <div
+              className={`w-6 h-6 rounded-full border-2 transition-all ${
+                pinInput.length >= 2
+                  ? 'bg-orange-500 border-orange-500 scale-110'
+                  : 'border-slate-600 bg-slate-800'
+              } ${pinError ? 'bg-rose-500 border-rose-500 animate-bounce' : ''}`}
+            />
+          </div>
+
+          {pinError && (
+            <p className="text-xs text-rose-400 font-bold animate-fadeIn">
+              Falscher PIN! Bitte nochmal eingeben.
+            </p>
+          )}
+
+          {/* Keypad */}
+          <div className="grid grid-cols-3 gap-3 pt-2">
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((num) => (
+              <button
+                key={num}
+                onClick={() => handlePinDigit(num)}
+                className="h-14 rounded-2xl bg-slate-800 hover:bg-slate-700 active:bg-orange-500 active:scale-95 text-xl font-bold text-slate-100 transition-all shadow-sm flex items-center justify-center"
+              >
+                {num}
+              </button>
+            ))}
+            <div />
+            <button
+              onClick={() => handlePinDigit('0')}
+              className="h-14 rounded-2xl bg-slate-800 hover:bg-slate-700 active:bg-orange-500 active:scale-95 text-xl font-bold text-slate-100 transition-all shadow-sm flex items-center justify-center"
+            >
+              0
+            </button>
+            <button
+              onClick={handlePinDelete}
+              className="h-14 rounded-2xl bg-slate-800/60 hover:bg-slate-700 active:scale-95 text-slate-400 hover:text-slate-100 transition-all flex items-center justify-center"
+              title="Löschen"
+            >
+              <Delete className="w-5 h-5" />
+            </button>
+          </div>
+
+          <p className="text-[11px] text-slate-500 pt-2">
+            Dein Handy merkt sich deinen Login automatisch.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= 2. MAIN APP SCREEN =================
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col pb-10">
       {/* Top Header */}
-      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-3.5 sticky top-0 z-20 shadow-sm">
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-3 sticky top-0 z-20 shadow-sm">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+            <h1 className="text-base font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5 leading-tight">
               <span>🐱</span> {CAT_NAMES}
             </h1>
-            <p className="text-xs font-semibold text-orange-600 dark:text-orange-400">
+            <p className="text-[11px] font-bold text-orange-600 dark:text-orange-400">
               Familien-Manager
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            {/* Logged in User Badge & Logout */}
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 text-xs font-bold transition-all shadow-2xs"
+              title="Klicken zum Abmelden / Profil wechseln"
+            >
+              <User className="w-3.5 h-3.5 text-orange-500" />
+              <span>{currentUser}</span>
+              <LogOut className="w-3 h-3 text-slate-400 ml-0.5" />
+            </button>
+
+            {/* Sound Toggle */}
             <button
               onClick={toggleSound}
               className={`p-2 rounded-full border transition-all active:scale-95 ${
@@ -356,7 +514,7 @@ export default function SimpleCatFeeder() {
         </div>
 
         {/* Tab Navigation */}
-        <div className="max-w-md mx-auto mt-3 grid grid-cols-2 gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl">
+        <div className="max-w-md mx-auto mt-2.5 grid grid-cols-2 gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl">
           <button
             onClick={() => setActiveTab('feeding')}
             className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
@@ -385,9 +543,14 @@ export default function SimpleCatFeeder() {
         {/* ================= TAB 1: FÜTTERUNG & TOILETTE ================= */}
         {activeTab === 'feeding' && (
           <div className="space-y-3 animate-fadeIn">
-            {/* 1. NASSFUTTER */}
+            {/* Quick Helper Subline */}
+            <p className="text-[11px] text-slate-500 text-center font-medium">
+              1-Klick als <span className="font-bold text-orange-600 dark:text-orange-400">{currentUser}</span> eintragen:
+            </p>
+
+            {/* 1. NASSFUTTER (1-TAP ACTION) */}
             <div
-              onClick={() => setSelectedType('nass')}
+              onClick={() => handleInstantFeed('nass')}
               className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-between"
             >
               <div className="flex items-center gap-3.5">
@@ -421,9 +584,9 @@ export default function SimpleCatFeeder() {
               </button>
             </div>
 
-            {/* 2. TROCKENFUTTER */}
+            {/* 2. TROCKENFUTTER (1-TAP ACTION) */}
             <div
-              onClick={() => setSelectedType('trocken')}
+              onClick={() => handleInstantFeed('trocken')}
               className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-between"
             >
               <div className="flex items-center gap-3.5">
@@ -457,9 +620,9 @@ export default function SimpleCatFeeder() {
               </button>
             </div>
 
-            {/* 3. LECKERLIES */}
+            {/* 3. LECKERLIES (1-TAP ACTION) */}
             <div
-              onClick={() => setSelectedType('leckerli')}
+              onClick={() => handleInstantFeed('leckerli')}
               className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-between"
             >
               <div className="flex items-center gap-3.5">
@@ -493,9 +656,9 @@ export default function SimpleCatFeeder() {
               </button>
             </div>
 
-            {/* 4. TOILETTE PUTZEN */}
+            {/* 4. TOILETTE PUTZEN (1-TAP ACTION) */}
             <div
-              onClick={() => setSelectedType('klo')}
+              onClick={() => handleInstantFeed('klo')}
               className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-between"
             >
               <div className="flex items-center gap-3.5">
@@ -840,48 +1003,6 @@ export default function SimpleCatFeeder() {
           </div>
         )}
       </main>
-
-      {/* ================= MODAL: WHO IS FEEDING / CLEANING? ================= */}
-      {selectedType && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl p-6 space-y-4 shadow-2xl border-t sm:border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <span>{getTypeIcon(selectedType)}</span>
-                  {getTypeLabel(selectedType)}
-                </h3>
-                <p className="text-xs text-slate-500">Wer hat es gerade gemacht?</p>
-              </div>
-              <button
-                onClick={() => setSelectedType(null)}
-                className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* All 6 Persons */}
-            <div className="grid grid-cols-2 gap-2.5 pt-1">
-              {USERS.map((name) => (
-                <button
-                  key={name}
-                  disabled={isSubmitting}
-                  onClick={() => handleApproveFeeding(name)}
-                  className="py-3.5 px-4 rounded-xl font-bold text-sm text-slate-800 dark:text-slate-100 bg-slate-100 hover:bg-orange-500 hover:text-white active:bg-orange-600 active:text-white dark:bg-slate-800 dark:hover:bg-orange-500 dark:hover:text-white transition-all shadow-xs flex items-center justify-center gap-1.5"
-                >
-                  <span>👤</span>
-                  <span>{name}</span>
-                </button>
-              ))}
-            </div>
-
-            <p className="text-center text-[11px] text-slate-400">
-              Klicke einfach auf deinen Namen zum Bestätigen.
-            </p>
-          </div>
-        </div>
-      )}
 
       {/* ================= MODAL: ADD EXPENSE ================= */}
       {isExpenseModalOpen && (
