@@ -36,6 +36,7 @@ import {
   Lock,
   User,
   Delete,
+  ShieldCheck,
 } from 'lucide-react';
 
 export default function SimpleCatFeeder() {
@@ -276,25 +277,23 @@ export default function SimpleCatFeeder() {
     }
   };
 
-  const handleDeleteFeeding = async (id: string) => {
-    if (confirm('Diesen Eintrag wirklich löschen?')) {
-      await removeFeeding(id);
-      setFeedings((prev) => prev.filter((i) => i.id !== id));
+  // Only allowed to delete your own feeding
+  const handleDeleteFeeding = async (item: FeedingLog) => {
+    if (!currentUser) return;
+    if (item.user_name !== currentUser) {
+      alert(`⛔ Du kannst nur deine eigenen Einträge löschen (dieser Eintrag gehört ${item.user_name}).`);
+      return;
+    }
+    if (confirm('Möchtest du deinen eigenen Fütterungs-Eintrag wirklich löschen?')) {
+      await removeFeeding(item.id);
+      setFeedings((prev) => prev.filter((i) => i.id !== item.id));
     }
   };
 
-  const handleResetWeek = async () => {
-    if (confirm('Möchtest du alle Fütterungen der letzten 7 Tage zurücksetzen?')) {
-      for (const f of feedings) {
-        await removeFeeding(f.id);
-      }
-      setFeedings([]);
-    }
-  };
-
-  // Submit expense
+  // Submit expense (paid_by defaults to logged-in user)
   const handleAddExpenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) return;
     const amountNum = parseFloat(expenseAmount.replace(',', '.'));
     if (isNaN(amountNum) || amountNum <= 0) {
       alert('Bitte einen gültigen Betrag eingeben');
@@ -325,17 +324,29 @@ export default function SimpleCatFeeder() {
     }
   };
 
-  const handleDeleteExpense = async (id: string) => {
-    if (confirm('Diesen Ausgabe-Eintrag wirklich löschen?')) {
-      await removeExpense(id);
-      setExpenses((prev) => prev.filter((i) => i.id !== id));
+  // Only allowed to delete your own expense
+  const handleDeleteExpense = async (exp: Expense) => {
+    if (!currentUser) return;
+    if (exp.paid_by !== currentUser) {
+      alert(`⛔ Du kannst nur deine eigenen Ausgaben löschen (wurde bezahlt von ${exp.paid_by}).`);
+      return;
+    }
+    if (confirm(`Diesen Einkauf ("${exp.description}" über ${Number(exp.amount).toFixed(2)} €) wirklich löschen?`)) {
+      await removeExpense(exp.id);
+      setExpenses((prev) => prev.filter((i) => i.id !== exp.id));
     }
   };
 
-  // Confirm / Undo Settlement Payment
+  // Confirm / Undo Settlement Payment (Only involved parties can confirm/undo)
   const currentMonthKey = format(selectedMonthDate, 'yyyy-MM');
 
   const handleConfirmPayment = async (fromUser: string, toUser: string, amount: number) => {
+    if (!currentUser) return;
+    if (currentUser !== fromUser && currentUser !== toUser) {
+      alert(`⛔ Nur ${fromUser} (Zahler) oder ${toUser} (Empfänger) dürfen diese Zahlung bestätigen.`);
+      return;
+    }
+
     if (confirm(`Bestätigen, dass ${fromUser} ${amount.toFixed(2)} € an ${toUser} bezahlt hat?`)) {
       const conf = await confirmSettlementPayment({
         month: currentMonthKey,
@@ -352,10 +363,16 @@ export default function SimpleCatFeeder() {
     }
   };
 
-  const handleUndoPayment = async (confirmationId: string) => {
+  const handleUndoPayment = async (confItem: SettlementConfirmation) => {
+    if (!currentUser) return;
+    if (currentUser !== confItem.from_user && currentUser !== confItem.to_user) {
+      alert(`⛔ Nur ${confItem.from_user} oder ${confItem.to_user} dürfen diese Zahlungsbestätigung zurücknehmen.`);
+      return;
+    }
+
     if (confirm('Zahlungsbestätigung wirklich rückgängig machen?')) {
-      await removeSettlementConfirmation(confirmationId);
-      setSettlements((prev) => prev.filter((s) => s.id !== confirmationId));
+      await removeSettlementConfirmation(confItem.id);
+      setSettlements((prev) => prev.filter((s) => s.id !== confItem.id));
     }
   };
 
@@ -692,21 +709,16 @@ export default function SimpleCatFeeder() {
               </button>
             </div>
 
-            {/* TODAY'S TIMELINE */}
+            {/* TODAY'S TIMELINE (Only own entries can be deleted) */}
             <div className="pt-2">
               <div className="flex items-center justify-between mb-2 px-1">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
                   Heute erledigt ({todayFeedings.length})
                 </h3>
-                {feedings.length > 0 && (
-                  <button
-                    onClick={handleResetWeek}
-                    className="text-[11px] text-slate-400 hover:text-rose-500 flex items-center gap-1 transition-colors"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    7-Tage Reset
-                  </button>
-                )}
+                <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 text-emerald-500" />
+                  Eigene Einträge geschützt
+                </span>
               </div>
 
               {todayFeedings.length === 0 ? (
@@ -722,6 +734,8 @@ export default function SimpleCatFeeder() {
                     } catch {
                       time = '';
                     }
+                    const isMyEntry = item.user_name === currentUser;
+
                     return (
                       <div
                         key={item.id}
@@ -740,13 +754,20 @@ export default function SimpleCatFeeder() {
                           </div>
                         </div>
 
-                        <button
-                          onClick={() => handleDeleteFeeding(item.id)}
-                          className="p-2 text-slate-300 hover:text-rose-500 active:scale-90 transition-all"
-                          title="Löschen"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {/* Trash Button ONLY visible for the creator! */}
+                        {isMyEntry ? (
+                          <button
+                            onClick={() => handleDeleteFeeding(item)}
+                            className="p-2 text-slate-300 hover:text-rose-500 active:scale-90 transition-all"
+                            title="Meinen Eintrag löschen"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <div className="p-2 opacity-20" title={`Erstellt von ${item.user_name}`}>
+                            <Lock className="w-3.5 h-3.5 text-slate-400" />
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -815,12 +836,17 @@ export default function SimpleCatFeeder() {
               </div>
 
               {/* Add Expense Button */}
-              <button
-                onClick={() => setIsExpenseModalOpen(true)}
-                className="w-full mt-4 py-3 bg-white text-emerald-800 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98] transition-all hover:bg-emerald-50"
-              >
-                <Plus className="w-4 h-4" /> + Ausgabe / Einkauf eintragen
-              </button>
+              {EXPENSE_USERS.includes(currentUser) && (
+                <button
+                  onClick={() => {
+                    setExpensePayer(currentUser);
+                    setIsExpenseModalOpen(true);
+                  }}
+                  className="w-full mt-4 py-3 bg-white text-emerald-800 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98] transition-all hover:bg-emerald-50"
+                >
+                  <Plus className="w-4 h-4" /> + Ausgabe als {currentUser} eintragen
+                </button>
+              )}
             </div>
 
             {/* WHO OWES WHOM (ABRECHNUNG & BEZAHL-BESTÄTIGUNG) */}
@@ -844,33 +870,54 @@ export default function SimpleCatFeeder() {
               ) : (
                 <div className="space-y-2">
                   <p className="text-[11px] text-slate-400 font-medium">Offene Überweisungen:</p>
-                  {settlementData.openSettlements.map((s) => (
-                    <div
-                      key={s.id}
-                      className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-2 shadow-xs"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2 text-xs font-bold">
-                          <span className="text-rose-600 dark:text-rose-400">{s.from}</span>
-                          <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-                          <span className="text-emerald-600 dark:text-emerald-400">{s.to}</span>
-                        </div>
-                        <span className="text-sm font-black text-slate-900 dark:text-white">
-                          {s.amount.toFixed(2)} €
-                        </span>
-                      </div>
+                  {settlementData.openSettlements.map((s) => {
+                    const isMyDebt = currentUser === s.from;
+                    const isMyCredit = currentUser === s.to;
+                    const canSettle = isMyDebt || isMyCredit;
 
-                      {/* Pay / Settle Button */}
-                      <button
-                        onClick={() => handleConfirmPayment(s.from, s.to, s.amount)}
-                        className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
-                        title="Zahlung bestätigen"
+                    return (
+                      <div
+                        key={s.id}
+                        className={`p-3.5 rounded-2xl border flex items-center justify-between gap-2 shadow-xs transition-all ${
+                          canSettle
+                            ? 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800'
+                            : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200/80 dark:border-slate-700/80 opacity-70'
+                        }`}
                       >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Bezahlt</span>
-                      </button>
-                    </div>
-                  ))}
+                        <div>
+                          <div className="flex items-center gap-2 text-xs font-bold">
+                            <span className={isMyDebt ? 'text-rose-600 font-black underline' : 'text-rose-600 dark:text-rose-400'}>
+                              {s.from} {isMyDebt ? '(Du)' : ''}
+                            </span>
+                            <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                            <span className={isMyCredit ? 'text-emerald-600 font-black underline' : 'text-emerald-600 dark:text-emerald-400'}>
+                              {s.to} {isMyCredit ? '(Du)' : ''}
+                            </span>
+                          </div>
+                          <span className="text-sm font-black text-slate-900 dark:text-white">
+                            {s.amount.toFixed(2)} €
+                          </span>
+                        </div>
+
+                        {/* Pay / Settle Button ONLY for involved persons (from or to)! */}
+                        {canSettle ? (
+                          <button
+                            onClick={() => handleConfirmPayment(s.from, s.to, s.amount)}
+                            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                            title="Zahlung als bezahlt markieren"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Bezahlt</span>
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-1 text-[10px] text-slate-400 font-medium">
+                            <Lock className="w-3 h-3" />
+                            <span>Nur {s.from}/{s.to}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
@@ -882,27 +929,41 @@ export default function SimpleCatFeeder() {
                     Bereits beglichene Zahlungen ({settlementData.paidSettlements.length}):
                   </p>
                   <div className="space-y-1.5">
-                    {settlementData.paidSettlements.map((s) => (
-                      <div
-                        key={s.id}
-                        className="px-3 py-2 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/60 flex items-center justify-between text-xs"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                            ✓ {s.from} ➜ {s.to}: {s.amount.toFixed(2)} €
-                          </span>
-                          <span className="text-[10px] text-slate-400">(Erhalten)</span>
-                        </div>
+                    {settlementData.paidSettlements.map((s) => {
+                      const canUndo = currentUser === s.from || currentUser === s.to;
 
-                        <button
-                          onClick={() => handleUndoPayment(s.id)}
-                          className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
-                          title="Rückgängig machen"
+                      return (
+                        <div
+                          key={s.id}
+                          className="px-3 py-2 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/60 flex items-center justify-between text-xs"
                         >
-                          <Undo2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
+                          <div className="flex items-center gap-2">
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                              ✓ {s.from} ➜ {s.to}: {s.amount.toFixed(2)} €
+                            </span>
+                            <span className="text-[10px] text-slate-400">(Bezahlt)</span>
+                          </div>
+
+                          {/* Undo ONLY for involved parties! */}
+                          {canUndo ? (
+                            <button
+                              onClick={() => {
+                                const found = settlements.find(
+                                  (conf) => conf.from_user === s.from && conf.to_user === s.to && conf.month === currentMonthKey
+                                );
+                                if (found) handleUndoPayment(found);
+                              }}
+                              className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
+                              title="Bestätigung zurücknehmen"
+                            >
+                              <Undo2 className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <Lock className="w-3 h-3 text-slate-400 opacity-40" />
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -914,13 +975,19 @@ export default function SimpleCatFeeder() {
                   {settlementData.balances.map((b) => {
                     const isPlus = b.balance > 0.01;
                     const isMinus = b.balance < -0.01;
+                    const isMe = b.userName === currentUser;
+
                     return (
                       <div
                         key={b.userName}
-                        className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 text-xs border border-slate-100 dark:border-slate-800"
+                        className={`flex items-center justify-between p-2.5 rounded-xl text-xs border transition-all ${
+                          isMe
+                            ? 'bg-orange-50/80 dark:bg-orange-950/30 border-orange-300 dark:border-orange-800 font-semibold'
+                            : 'bg-slate-50 dark:bg-slate-800/40 border-slate-100 dark:border-slate-800'
+                        }`}
                       >
                         <span className="font-bold text-slate-800 dark:text-slate-200">
-                          {b.userName}
+                          {b.userName} {isMe ? '👤 (Du)' : ''}
                         </span>
                         <div className="text-right">
                           <span className="text-[10px] text-slate-400 block">
@@ -949,11 +1016,13 @@ export default function SimpleCatFeeder() {
               </div>
             </div>
 
-            {/* EXPENSES HISTORY FOR SELECTED MONTH */}
+            {/* EXPENSES HISTORY FOR SELECTED MONTH (Only own expenses have delete icon) */}
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Einkäufe im {format(selectedMonthDate, 'MMMM yyyy', { locale: de })} ({selectedMonthExpenses.length})
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Einkäufe im {format(selectedMonthDate, 'MMMM yyyy', { locale: de })} ({selectedMonthExpenses.length})
+                </h3>
+              </div>
 
               {selectedMonthExpenses.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-4">
@@ -968,6 +1037,8 @@ export default function SimpleCatFeeder() {
                     } catch {
                       dateStr = '';
                     }
+                    const isMyExpense = exp.paid_by === currentUser;
+
                     return (
                       <div
                         key={exp.id}
@@ -978,7 +1049,7 @@ export default function SimpleCatFeeder() {
                             {exp.description}
                           </p>
                           <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                            Bezahlt von <span className="font-semibold text-emerald-600 dark:text-emerald-400">{exp.paid_by}</span> • {dateStr}
+                            Bezahlt von <span className="font-semibold text-emerald-600 dark:text-emerald-400">{exp.paid_by} {isMyExpense ? '(Du)' : ''}</span> • {dateStr}
                           </p>
                         </div>
 
@@ -986,13 +1057,21 @@ export default function SimpleCatFeeder() {
                           <span className="text-xs font-black text-slate-900 dark:text-white">
                             {Number(exp.amount).toFixed(2)} €
                           </span>
-                          <button
-                            onClick={() => handleDeleteExpense(exp.id)}
-                            className="p-1.5 text-slate-300 hover:text-rose-500 active:scale-90 transition-all"
-                            title="Löschen"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+
+                          {/* Delete button ONLY for the buyer! */}
+                          {isMyExpense ? (
+                            <button
+                              onClick={() => handleDeleteExpense(exp)}
+                              className="p-1.5 text-slate-300 hover:text-rose-500 active:scale-90 transition-all"
+                              title="Meinen Einkauf löschen"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <div className="p-1.5 opacity-20" title={`Bezahlt von ${exp.paid_by}`}>
+                              <Lock className="w-3 h-3 text-slate-400" />
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1055,26 +1134,16 @@ export default function SimpleCatFeeder() {
                 />
               </div>
 
-              {/* Who paid? (5 people, excluding Lennart) */}
+              {/* Who paid? (Defaults to currentUser) */}
               <div>
                 <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">
                   Wer hat bezahlt?
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {EXPENSE_USERS.map((user) => (
-                    <button
-                      type="button"
-                      key={user}
-                      onClick={() => setExpensePayer(user)}
-                      className={`py-2 px-2.5 rounded-xl font-bold text-xs border transition-all ${
-                        expensePayer === user
-                          ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
-                          : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      {user}
-                    </button>
-                  ))}
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-800 dark:text-emerald-200">
+                    Eingetragen als: {expensePayer} (Du)
+                  </span>
+                  <span className="text-[10px] text-emerald-600 font-semibold">Geschützt 🔒</span>
                 </div>
               </div>
 
