@@ -139,7 +139,7 @@ export default function SimpleCatFeeder() {
   };
 
   const handleLogout = () => {
-    if (confirm('Möchtest du dich abmelden / PIN wechseln?')) {
+    if (confirm('Abmelden / PIN wechseln?')) {
       setCurrentUser(null);
       setPinInput('');
       try {
@@ -281,22 +281,22 @@ export default function SimpleCatFeeder() {
   const handleDeleteFeeding = async (item: FeedingLog) => {
     if (!currentUser) return;
     if (item.user_name !== currentUser) {
-      alert(`⛔ Du kannst nur deine eigenen Einträge löschen (dieser Eintrag gehört ${item.user_name}).`);
+      alert(`Du kannst nur deine eigenen Einträge löschen (${item.user_name}).`);
       return;
     }
-    if (confirm('Möchtest du deinen eigenen Fütterungs-Eintrag wirklich löschen?')) {
+    if (confirm('Eintrag löschen?')) {
       await removeFeeding(item.id);
       setFeedings((prev) => prev.filter((i) => i.id !== item.id));
     }
   };
 
-  // Submit expense (paid_by defaults to logged-in user)
+  // Submit expense
   const handleAddExpenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
     const amountNum = parseFloat(expenseAmount.replace(',', '.'));
     if (isNaN(amountNum) || amountNum <= 0) {
-      alert('Bitte einen gültigen Betrag eingeben');
+      alert('Bitte gültigen Betrag eingeben');
       return;
     }
 
@@ -305,7 +305,7 @@ export default function SimpleCatFeeder() {
       const newExp = await addExpense({
         paid_by: expensePayer,
         amount: amountNum,
-        description: expenseDesc.trim() || 'Katzen-Einkauf',
+        description: expenseDesc.trim() || 'Katzen-Bedarf',
       });
 
       setExpenses((prev) => [newExp, ...prev.filter((i) => i.id !== newExp.id)]);
@@ -328,26 +328,26 @@ export default function SimpleCatFeeder() {
   const handleDeleteExpense = async (exp: Expense) => {
     if (!currentUser) return;
     if (exp.paid_by !== currentUser) {
-      alert(`⛔ Du kannst nur deine eigenen Ausgaben löschen (wurde bezahlt von ${exp.paid_by}).`);
+      alert(`Du kannst nur deine eigenen Ausgaben löschen (${exp.paid_by}).`);
       return;
     }
-    if (confirm(`Diesen Einkauf ("${exp.description}" über ${Number(exp.amount).toFixed(2)} €) wirklich löschen?`)) {
+    if (confirm(`Einkauf ("${exp.description}") löschen?`)) {
       await removeExpense(exp.id);
       setExpenses((prev) => prev.filter((i) => i.id !== exp.id));
     }
   };
 
-  // Confirm / Undo Settlement Payment (Only involved parties can confirm/undo)
+  // Confirm / Undo Settlement Payment
   const currentMonthKey = format(selectedMonthDate, 'yyyy-MM');
 
   const handleConfirmPayment = async (fromUser: string, toUser: string, amount: number) => {
     if (!currentUser) return;
     if (currentUser !== fromUser && currentUser !== toUser) {
-      alert(`⛔ Nur ${fromUser} (Zahler) oder ${toUser} (Empfänger) dürfen diese Zahlung bestätigen.`);
+      alert(`Nur ${fromUser} oder ${toUser} dürfen diese Zahlung bestätigen.`);
       return;
     }
 
-    if (confirm(`Bestätigen, dass ${fromUser} ${amount.toFixed(2)} € an ${toUser} bezahlt hat?`)) {
+    if (confirm(`${fromUser} hat ${amount.toFixed(2)} € an ${toUser} bezahlt?`)) {
       const conf = await confirmSettlementPayment({
         month: currentMonthKey,
         from_user: fromUser,
@@ -366,11 +366,11 @@ export default function SimpleCatFeeder() {
   const handleUndoPayment = async (confItem: SettlementConfirmation) => {
     if (!currentUser) return;
     if (currentUser !== confItem.from_user && currentUser !== confItem.to_user) {
-      alert(`⛔ Nur ${confItem.from_user} oder ${confItem.to_user} dürfen diese Zahlungsbestätigung zurücknehmen.`);
+      alert(`Nur ${confItem.from_user} oder ${confItem.to_user} dürfen dies zurücknehmen.`);
       return;
     }
 
-    if (confirm('Zahlungsbestätigung wirklich rückgängig machen?')) {
+    if (confirm('Zahlungsbestätigung zurücknehmen?')) {
       await removeSettlementConfirmation(confItem.id);
       setSettlements((prev) => prev.filter((s) => s.id !== confItem.id));
     }
@@ -399,7 +399,7 @@ export default function SimpleCatFeeder() {
     if (type === 'nass') return 'Nassfutter';
     if (type === 'trocken') return 'Trockenfutter';
     if (type === 'leckerli') return 'Leckerlies';
-    return 'Toilette putzen';
+    return 'Toilette';
   };
 
   const getTypeIcon = (type: FeedingType) => {
@@ -425,7 +425,7 @@ export default function SimpleCatFeeder() {
             </div>
             <h1 className="text-xl font-black tracking-tight">{CAT_NAMES}</h1>
             <p className="text-xs text-slate-400 font-medium">
-              Gib deinen 2-stelligen PIN ein:
+              PIN eingeben
             </p>
           </div>
 
@@ -449,7 +449,7 @@ export default function SimpleCatFeeder() {
 
           {pinError && (
             <p className="text-xs text-rose-400 font-bold animate-fadeIn">
-              Falscher PIN! Bitte nochmal eingeben.
+              Falscher PIN
             </p>
           )}
 
@@ -479,10 +479,6 @@ export default function SimpleCatFeeder() {
               <Delete className="w-5 h-5" />
             </button>
           </div>
-
-          <p className="text-[11px] text-slate-500 pt-2">
-            Dein Handy merkt sich deinen Login automatisch.
-          </p>
         </div>
       </div>
     );
@@ -498,9 +494,6 @@ export default function SimpleCatFeeder() {
             <h1 className="text-base font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5 leading-tight">
               <span>🐱</span> {CAT_NAMES}
             </h1>
-            <p className="text-[11px] font-bold text-orange-600 dark:text-orange-400">
-              Familien-Manager
-            </p>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -508,7 +501,7 @@ export default function SimpleCatFeeder() {
             <button
               onClick={handleLogout}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 text-xs font-bold transition-all shadow-2xs"
-              title="Klicken zum Abmelden / Profil wechseln"
+              title="Abmelden"
             >
               <User className="w-3.5 h-3.5 text-orange-500" />
               <span>{currentUser}</span>
@@ -523,7 +516,7 @@ export default function SimpleCatFeeder() {
                   ? 'bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-950/60 dark:border-orange-800 dark:text-orange-400'
                   : 'bg-slate-100 border-slate-200 text-slate-400 dark:bg-slate-800 dark:border-slate-700'
               }`}
-              title={soundEnabled ? 'Miau-Ton: An' : 'Ton: Aus'}
+              title={soundEnabled ? 'Ton an' : 'Ton aus'}
             >
               {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
             </button>
@@ -540,7 +533,7 @@ export default function SimpleCatFeeder() {
                 : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            <span>🥣</span> Fütterung & Klo
+            <span>🥣</span> Futter & Klo
           </button>
           <button
             onClick={() => setActiveTab('expenses')}
@@ -550,22 +543,17 @@ export default function SimpleCatFeeder() {
                 : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            <span>💰</span> Katzen-Kasse
+            <span>💰</span> Kasse
           </button>
         </div>
       </header>
 
       {/* Main Content Area */}
-      <main className="max-w-md w-full mx-auto px-4 py-4 space-y-3 flex-1">
+      <main className="max-w-md w-full mx-auto px-4 py-3 space-y-3 flex-1">
         {/* ================= TAB 1: FÜTTERUNG & TOILETTE ================= */}
         {activeTab === 'feeding' && (
           <div className="space-y-3 animate-fadeIn">
-            {/* Quick Helper Subline */}
-            <p className="text-[11px] text-slate-500 text-center font-medium">
-              1-Klick als <span className="font-bold text-orange-600 dark:text-orange-400">{currentUser}</span> eintragen:
-            </p>
-
-            {/* 1. NASSFUTTER (1-TAP ACTION) */}
+            {/* 1. NASSFUTTER */}
             <div
               onClick={() => handleInstantFeed('nass')}
               className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-between"
@@ -591,8 +579,8 @@ export default function SimpleCatFeeder() {
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     {nassStats.last
-                      ? `Zuletzt um ${nassStats.timeStr} Uhr von ${nassStats.last.user_name}`
-                      : 'Heute noch nicht gefüttert'}
+                      ? `Zuletzt ${nassStats.timeStr} Uhr von ${nassStats.last.user_name}`
+                      : 'Heute noch nicht'}
                   </p>
                 </div>
               </div>
@@ -601,7 +589,7 @@ export default function SimpleCatFeeder() {
               </button>
             </div>
 
-            {/* 2. TROCKENFUTTER (1-TAP ACTION) */}
+            {/* 2. TROCKENFUTTER */}
             <div
               onClick={() => handleInstantFeed('trocken')}
               className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-between"
@@ -627,8 +615,8 @@ export default function SimpleCatFeeder() {
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     {trockenStats.last
-                      ? `Zuletzt um ${trockenStats.timeStr} Uhr von ${trockenStats.last.user_name}`
-                      : 'Heute noch nicht aufgefüllt'}
+                      ? `Zuletzt ${trockenStats.timeStr} Uhr von ${trockenStats.last.user_name}`
+                      : 'Heute noch nicht'}
                   </p>
                 </div>
               </div>
@@ -637,7 +625,7 @@ export default function SimpleCatFeeder() {
               </button>
             </div>
 
-            {/* 3. LECKERLIES (1-TAP ACTION) */}
+            {/* 3. LECKERLIES */}
             <div
               onClick={() => handleInstantFeed('leckerli')}
               className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-between"
@@ -663,8 +651,8 @@ export default function SimpleCatFeeder() {
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     {leckerliStats.last
-                      ? `Zuletzt um ${leckerliStats.timeStr} Uhr von ${leckerliStats.last.user_name}`
-                      : 'Heute noch keine Leckerlies'}
+                      ? `Zuletzt ${leckerliStats.timeStr} Uhr von ${leckerliStats.last.user_name}`
+                      : 'Heute noch keine'}
                   </p>
                 </div>
               </div>
@@ -673,7 +661,7 @@ export default function SimpleCatFeeder() {
               </button>
             </div>
 
-            {/* 4. TOILETTE PUTZEN (1-TAP ACTION) */}
+            {/* 4. TOILETTE PUTZEN */}
             <div
               onClick={() => handleInstantFeed('klo')}
               className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-between"
@@ -685,7 +673,7 @@ export default function SimpleCatFeeder() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                      Toilette putzen
+                      Toilette
                     </h2>
                     <span
                       className={`text-xs px-2 py-0.5 rounded-full font-bold ${
@@ -699,8 +687,8 @@ export default function SimpleCatFeeder() {
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     {kloStats.last
-                      ? `Zuletzt um ${kloStats.timeStr} Uhr von ${kloStats.last.user_name}`
-                      : 'Heute noch nicht gereinigt'}
+                      ? `Zuletzt ${kloStats.timeStr} Uhr von ${kloStats.last.user_name}`
+                      : 'Heute noch nicht'}
                   </p>
                 </div>
               </div>
@@ -709,21 +697,17 @@ export default function SimpleCatFeeder() {
               </button>
             </div>
 
-            {/* TODAY'S TIMELINE (Only own entries can be deleted) */}
+            {/* TODAY'S TIMELINE */}
             <div className="pt-2">
               <div className="flex items-center justify-between mb-2 px-1">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Heute erledigt ({todayFeedings.length})
+                  Heute ({todayFeedings.length})
                 </h3>
-                <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3 text-emerald-500" />
-                  Eigene Einträge geschützt
-                </span>
               </div>
 
               {todayFeedings.length === 0 ? (
                 <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 text-center border border-slate-200 dark:border-slate-800 text-slate-400 text-xs">
-                  Heute wurde noch nichts eingetragen.
+                  Heute noch nichts eingetragen.
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -747,24 +731,24 @@ export default function SimpleCatFeeder() {
                             <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                               <span>{getTypeLabel(item.type)}</span>
                               <span className="text-orange-600 dark:text-orange-400 font-semibold">
-                                von {item.user_name}
+                                {item.user_name}
                               </span>
                             </div>
                             <span className="text-[11px] text-slate-400">{time} Uhr</span>
                           </div>
                         </div>
 
-                        {/* Trash Button ONLY visible for the creator! */}
+                        {/* Trash Button ONLY for creator */}
                         {isMyEntry ? (
                           <button
                             onClick={() => handleDeleteFeeding(item)}
                             className="p-2 text-slate-300 hover:text-rose-500 active:scale-90 transition-all"
-                            title="Meinen Eintrag löschen"
+                            title="Löschen"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         ) : (
-                          <div className="p-2 opacity-20" title={`Erstellt von ${item.user_name}`}>
+                          <div className="p-2 opacity-20">
                             <Lock className="w-3.5 h-3.5 text-slate-400" />
                           </div>
                         )}
@@ -785,7 +769,6 @@ export default function SimpleCatFeeder() {
               <button
                 onClick={() => setSelectedMonthDate((prev) => subMonths(prev, 1))}
                 className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all"
-                title="Vorheriger Monat"
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
@@ -794,17 +777,11 @@ export default function SimpleCatFeeder() {
                 <span className="text-sm font-black text-slate-900 dark:text-white block">
                   {format(selectedMonthDate, 'MMMM yyyy', { locale: de })}
                 </span>
-                <span className="text-[10px] text-slate-400 font-medium">
-                  {format(selectedMonthDate, 'yyyy-MM') === format(new Date(), 'yyyy-MM')
-                    ? 'Aktueller Monat'
-                    : 'Vergangener Monat (Archiv)'}
-                </span>
               </div>
 
               <button
                 onClick={() => setSelectedMonthDate((prev) => addMonths(prev, 1))}
                 className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-95 transition-all"
-                title="Nächster Monat"
               >
                 <ChevronRight className="w-5 h-5" />
               </button>
@@ -812,26 +789,16 @@ export default function SimpleCatFeeder() {
 
             {/* MONTH TOTAL BANNER */}
             <div className="bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-3xl p-5 shadow-md">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-100 flex items-center gap-1.5">
-                  <Receipt className="w-4 h-4" />
-                  Monats-Übersicht
-                </span>
-                <span className="text-[11px] bg-white/20 px-2 py-0.5 rounded-full font-medium">
-                  5 Personen (ohne Lennart)
-                </span>
-              </div>
-
-              <div className="flex items-baseline justify-between mt-1">
+              <div className="flex items-baseline justify-between">
                 <div>
                   <p className="text-3xl font-black">{settlementData.total.toFixed(2)} €</p>
                   <p className="text-xs text-emerald-100 font-medium mt-0.5">
-                    Gesamtausgaben in {format(selectedMonthDate, 'MMMM', { locale: de })}
+                    Gesamt ({format(selectedMonthDate, 'MMMM', { locale: de })})
                   </p>
                 </div>
                 <div className="text-right">
                   <p className="text-lg font-bold">{settlementData.perPerson.toFixed(2)} €</p>
-                  <p className="text-[11px] text-emerald-100">pro Person</p>
+                  <p className="text-[11px] text-emerald-100">pro Person (5)</p>
                 </div>
               </div>
 
@@ -844,18 +811,16 @@ export default function SimpleCatFeeder() {
                   }}
                   className="w-full mt-4 py-3 bg-white text-emerald-800 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.98] transition-all hover:bg-emerald-50"
                 >
-                  <Plus className="w-4 h-4" /> + Ausgabe als {currentUser} eintragen
+                  <Plus className="w-4 h-4" /> + Ausgabe eintragen
                 </button>
               )}
             </div>
 
-            {/* WHO OWES WHOM (ABRECHNUNG & BEZAHL-BESTÄTIGUNG) */}
+            {/* WHO OWES WHOM */}
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                  <span>🔄</span> Wer schuldet wem was?
-                </h3>
-              </div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Wer schuldet wem?
+              </h3>
 
               {/* 1. Offene Schulden */}
               {settlementData.openSettlements.length === 0 ? (
@@ -863,13 +828,12 @@ export default function SimpleCatFeeder() {
                   <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                   <p className="text-xs font-medium text-emerald-900 dark:text-emerald-200">
                     {settlementData.total === 0
-                      ? 'Keine Ausgaben in diesem Monat vorhanden.'
-                      : 'Alle Schulden für diesen Monat sind vollständig bezahlt & ausgeglichen! 🎉'}
+                      ? 'Keine Ausgaben vorhanden.'
+                      : 'Alles bezahlt & ausgeglichen! 🎉'}
                   </p>
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <p className="text-[11px] text-slate-400 font-medium">Offene Überweisungen:</p>
                   {settlementData.openSettlements.map((s) => {
                     const isMyDebt = currentUser === s.from;
                     const isMyCredit = currentUser === s.to;
@@ -899,12 +863,11 @@ export default function SimpleCatFeeder() {
                           </span>
                         </div>
 
-                        {/* Pay / Settle Button ONLY for involved persons (from or to)! */}
+                        {/* Pay Button ONLY for involved persons */}
                         {canSettle ? (
                           <button
                             onClick={() => handleConfirmPayment(s.from, s.to, s.amount)}
                             className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
-                            title="Zahlung als bezahlt markieren"
                           >
                             <Check className="w-3.5 h-3.5" />
                             <span>Bezahlt</span>
@@ -912,7 +875,7 @@ export default function SimpleCatFeeder() {
                         ) : (
                           <div className="flex items-center gap-1 text-[10px] text-slate-400 font-medium">
                             <Lock className="w-3 h-3" />
-                            <span>Nur {s.from}/{s.to}</span>
+                            <span>{s.from}/{s.to}</span>
                           </div>
                         )}
                       </div>
@@ -924,9 +887,8 @@ export default function SimpleCatFeeder() {
               {/* 2. Bereits beglichene Zahlungen */}
               {settlementData.paidSettlements.length > 0 && (
                 <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                  <p className="text-[11px] text-slate-400 font-bold flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                    Bereits beglichene Zahlungen ({settlementData.paidSettlements.length}):
+                  <p className="text-[11px] text-slate-400 font-bold">
+                    Beglichen ({settlementData.paidSettlements.length}):
                   </p>
                   <div className="space-y-1.5">
                     {settlementData.paidSettlements.map((s) => {
@@ -937,14 +899,10 @@ export default function SimpleCatFeeder() {
                           key={s.id}
                           className="px-3 py-2 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/60 flex items-center justify-between text-xs"
                         >
-                          <div className="flex items-center gap-2">
-                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                              ✓ {s.from} ➜ {s.to}: {s.amount.toFixed(2)} €
-                            </span>
-                            <span className="text-[10px] text-slate-400">(Bezahlt)</span>
-                          </div>
+                          <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                            ✓ {s.from} ➜ {s.to}: {s.amount.toFixed(2)} €
+                          </span>
 
-                          {/* Undo ONLY for involved parties! */}
                           {canUndo ? (
                             <button
                               onClick={() => {
@@ -954,7 +912,7 @@ export default function SimpleCatFeeder() {
                                 if (found) handleUndoPayment(found);
                               }}
                               className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
-                              title="Bestätigung zurücknehmen"
+                              title="Zurücknehmen"
                             >
                               <Undo2 className="w-3.5 h-3.5" />
                             </button>
@@ -970,7 +928,7 @@ export default function SimpleCatFeeder() {
 
               {/* 3. Salden-Übersicht */}
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                <p className="text-[11px] font-bold text-slate-400 mb-2">Salden-Übersicht:</p>
+                <p className="text-[11px] font-bold text-slate-400 mb-2">Übersicht:</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {settlementData.balances.map((b) => {
                     const isPlus = b.balance > 0.01;
@@ -987,7 +945,7 @@ export default function SimpleCatFeeder() {
                         }`}
                       >
                         <span className="font-bold text-slate-800 dark:text-slate-200">
-                          {b.userName} {isMe ? '👤 (Du)' : ''}
+                          {b.userName} {isMe ? '(Du)' : ''}
                         </span>
                         <div className="text-right">
                           <span className="text-[10px] text-slate-400 block">
@@ -1003,10 +961,10 @@ export default function SimpleCatFeeder() {
                             }`}
                           >
                             {isPlus
-                              ? `+${b.balance.toFixed(2)} € (bekommt)`
+                              ? `+${b.balance.toFixed(2)} €`
                               : isMinus
-                              ? `${b.balance.toFixed(2)} € (schuldet)`
-                              : '0.00 € (ausgeglichen)'}
+                              ? `${b.balance.toFixed(2)} €`
+                              : '0.00 €'}
                           </span>
                         </div>
                       </div>
@@ -1016,17 +974,15 @@ export default function SimpleCatFeeder() {
               </div>
             </div>
 
-            {/* EXPENSES HISTORY FOR SELECTED MONTH (Only own expenses have delete icon) */}
+            {/* EXPENSES HISTORY */}
             <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Einkäufe im {format(selectedMonthDate, 'MMMM yyyy', { locale: de })} ({selectedMonthExpenses.length})
-                </h3>
-              </div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Einkäufe ({selectedMonthExpenses.length})
+              </h3>
 
               {selectedMonthExpenses.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-4">
-                  Keine Einkäufe in diesem Monat erfasst.
+                  Keine Einkäufe.
                 </p>
               ) : (
                 <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
@@ -1049,7 +1005,7 @@ export default function SimpleCatFeeder() {
                             {exp.description}
                           </p>
                           <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                            Bezahlt von <span className="font-semibold text-emerald-600 dark:text-emerald-400">{exp.paid_by} {isMyExpense ? '(Du)' : ''}</span> • {dateStr}
+                            {exp.paid_by} {isMyExpense ? '(Du)' : ''} • {dateStr}
                           </p>
                         </div>
 
@@ -1058,17 +1014,16 @@ export default function SimpleCatFeeder() {
                             {Number(exp.amount).toFixed(2)} €
                           </span>
 
-                          {/* Delete button ONLY for the buyer! */}
                           {isMyExpense ? (
                             <button
                               onClick={() => handleDeleteExpense(exp)}
                               className="p-1.5 text-slate-300 hover:text-rose-500 active:scale-90 transition-all"
-                              title="Meinen Einkauf löschen"
+                              title="Löschen"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           ) : (
-                            <div className="p-1.5 opacity-20" title={`Bezahlt von ${exp.paid_by}`}>
+                            <div className="p-1.5 opacity-20">
                               <Lock className="w-3 h-3 text-slate-400" />
                             </div>
                           )}
@@ -1088,12 +1043,9 @@ export default function SimpleCatFeeder() {
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fadeIn">
           <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl p-6 space-y-4 shadow-2xl border-t sm:border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <span>💰</span> Neue Ausgabe eintragen
-                </h3>
-                <p className="text-xs text-slate-500">Wird durch 5 geteilt (ohne Lennart)</p>
-              </div>
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                Ausgabe eintragen
+              </h3>
               <button
                 onClick={() => setIsExpenseModalOpen(false)}
                 className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500"
@@ -1103,7 +1055,6 @@ export default function SimpleCatFeeder() {
             </div>
 
             <form onSubmit={handleAddExpenseSubmit} className="space-y-3.5">
-              {/* Amount */}
               <div>
                 <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">
                   Betrag (€)
@@ -1111,7 +1062,7 @@ export default function SimpleCatFeeder() {
                 <input
                   type="text"
                   inputMode="decimal"
-                  placeholder="z. B. 24.99"
+                  placeholder="24.99"
                   required
                   value={expenseAmount}
                   onChange={(e) => setExpenseAmount(e.target.value)}
@@ -1119,14 +1070,13 @@ export default function SimpleCatFeeder() {
                 />
               </div>
 
-              {/* Description */}
               <div>
                 <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">
-                  Was wurde gekauft?
+                  Beschreibung
                 </label>
                 <input
                   type="text"
-                  placeholder="z. B. Katzenstreu, Nassfutter Dose..."
+                  placeholder="z. B. Katzenstreu, Futter..."
                   required
                   value={expenseDesc}
                   onChange={(e) => setExpenseDesc(e.target.value)}
@@ -1134,26 +1084,12 @@ export default function SimpleCatFeeder() {
                 />
               </div>
 
-              {/* Who paid? (Defaults to currentUser) */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1">
-                  Wer hat bezahlt?
-                </label>
-                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
-                  <span className="text-xs font-bold text-emerald-800 dark:text-emerald-200">
-                    Eingetragen als: {expensePayer} (Du)
-                  </span>
-                  <span className="text-[10px] text-emerald-600 font-semibold">Geschützt 🔒</span>
-                </div>
-              </div>
-
-              {/* Submit */}
               <button
                 type="submit"
                 disabled={expenseSubmitting}
                 className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-md active:scale-[0.98] transition-all disabled:opacity-50"
               >
-                {expenseSubmitting ? 'Wird gespeichert...' : 'Ausgabe speichern'}
+                {expenseSubmitting ? 'Speichern...' : 'Speichern'}
               </button>
             </form>
           </div>
