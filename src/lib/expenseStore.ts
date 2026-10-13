@@ -207,7 +207,7 @@ export function calculateSettlements(
   paidSettlements: DebtSettlement[];
 } {
   const total = Number(expenses.reduce((sum, e) => sum + Number(e.amount), 0).toFixed(2));
-  const memberCount = EXPENSE_USERS.length; // 5 people (excluding Lennart)
+  const memberCount = EXPENSE_USERS.length; // Active expense members
   const perPerson = memberCount > 0 ? Number((total / memberCount).toFixed(2)) : 0;
 
   // Calculate what each of the 5 people paid

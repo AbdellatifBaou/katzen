@@ -798,7 +798,7 @@ export default function SimpleCatFeeder() {
                 </div>
                 <div className="text-right">
                   <p className="text-lg font-bold">{settlementData.perPerson.toFixed(2)} €</p>
-                  <p className="text-[11px] text-emerald-100">pro Person (5)</p>
+                  <p className="text-[11px] text-emerald-100">pro Person ({EXPENSE_USERS.length})</p>
                 </div>
               </div>
 

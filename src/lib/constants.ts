@@ -19,13 +19,12 @@ export const USERS = [
   'Lennart',
 ];
 
-// 5 members share cat costs (Lennart is excluded from expenses)
+// 4 members currently share cat costs (Lennart and Romy excluded from expenses for now)
 export const EXPENSE_USERS = [
   'Latif',
   'Wiame',
   'Karam',
   'Adiana',
-  'Romy',
 ];
 
 export const CAT_NAMES = 'Mimi • Miscu • Luna';
