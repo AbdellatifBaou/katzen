@@ -342,12 +342,12 @@ export default function SimpleCatFeeder() {
 
   const handleConfirmPayment = async (fromUser: string, toUser: string, amount: number) => {
     if (!currentUser) return;
-    if (currentUser !== fromUser && currentUser !== toUser) {
-      alert(`Nur ${fromUser} oder ${toUser} dürfen diese Zahlung bestätigen.`);
+    if (currentUser !== toUser) {
+      alert(`Nur ${toUser} (Empfänger) darf bestätigen, dass das Geld angekommen ist.`);
       return;
     }
 
-    if (confirm(`${fromUser} hat ${amount.toFixed(2)} € an ${toUser} bezahlt?`)) {
+    if (confirm(`Bestätigen, dass du (${toUser}) ${amount.toFixed(2)} € von ${fromUser} erhalten hast?`)) {
       const conf = await confirmSettlementPayment({
         month: currentMonthKey,
         from_user: fromUser,
@@ -365,8 +365,8 @@ export default function SimpleCatFeeder() {
 
   const handleUndoPayment = async (confItem: SettlementConfirmation) => {
     if (!currentUser) return;
-    if (currentUser !== confItem.from_user && currentUser !== confItem.to_user) {
-      alert(`Nur ${confItem.from_user} oder ${confItem.to_user} dürfen dies zurücknehmen.`);
+    if (currentUser !== confItem.to_user) {
+      alert(`Nur ${confItem.to_user} (Empfänger) darf dies zurücknehmen.`);
       return;
     }
 
@@ -837,7 +837,7 @@ export default function SimpleCatFeeder() {
                   {settlementData.openSettlements.map((s) => {
                     const isMyDebt = currentUser === s.from;
                     const isMyCredit = currentUser === s.to;
-                    const canSettle = isMyDebt || isMyCredit;
+                    const canSettle = isMyCredit; // Only the person receiving the money can confirm it arrived!
 
                     return (
                       <div
@@ -863,19 +863,20 @@ export default function SimpleCatFeeder() {
                           </span>
                         </div>
 
-                        {/* Pay Button ONLY for involved persons */}
+                        {/* Pay Button ONLY for recipient */}
                         {canSettle ? (
                           <button
                             onClick={() => handleConfirmPayment(s.from, s.to, s.amount)}
                             className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                            title="Als erhalten bestätigen"
                           >
                             <Check className="w-3.5 h-3.5" />
-                            <span>Bezahlt</span>
+                            <span>Erhalten</span>
                           </button>
                         ) : (
                           <div className="flex items-center gap-1 text-[10px] text-slate-400 font-medium">
                             <Lock className="w-3 h-3" />
-                            <span>{s.from}/{s.to}</span>
+                            <span>Nur {s.to}</span>
                           </div>
                         )}
                       </div>
@@ -892,7 +893,7 @@ export default function SimpleCatFeeder() {
                   </p>
                   <div className="space-y-1.5">
                     {settlementData.paidSettlements.map((s) => {
-                      const canUndo = currentUser === s.from || currentUser === s.to;
+                      const canUndo = currentUser === s.to;
 
                       return (
                         <div
