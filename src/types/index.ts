@@ -1,4 +1,4 @@
-export type FeedingType = 'nass' | 'trocken' | 'leckerli' | 'klo';
+export type FeedingType = 'nass' | 'trocken' | 'leckerli' | 'klo' | 'medizin';
 
 export interface FeedingLog {
   id: string;

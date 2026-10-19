@@ -254,6 +254,7 @@ export default function SimpleCatFeeder() {
   const trockenStats = getStats('trocken');
   const leckerliStats = getStats('leckerli');
   const kloStats = getStats('klo');
+  const medizinStats = getStats('medizin');
 
   // 1-TAP Instant Feeding/Cleaning with logged-in user!
   const handleInstantFeed = async (type: FeedingType) => {
@@ -399,14 +400,18 @@ export default function SimpleCatFeeder() {
     if (type === 'nass') return 'Nassfutter';
     if (type === 'trocken') return 'Trockenfutter';
     if (type === 'leckerli') return 'Leckerlies';
-    return 'Toilette';
+    if (type === 'klo') return 'Toilette';
+    if (type === 'medizin') return 'Medizin (Luna)';
+    return type;
   };
 
   const getTypeIcon = (type: FeedingType) => {
     if (type === 'nass') return '🥣';
     if (type === 'trocken') return '🍪';
     if (type === 'leckerli') return '🐟';
-    return '🧹';
+    if (type === 'klo') return '🧹';
+    if (type === 'medizin') return '💊';
+    return '🐾';
   };
 
   // ================= 1. PIN LOGIN SCREEN =================
@@ -693,6 +698,45 @@ export default function SimpleCatFeeder() {
                 </div>
               </div>
               <button className="w-9 h-9 rounded-full bg-teal-500 text-white flex items-center justify-center font-bold shadow-sm">
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 5. MEDIZIN (LUNA) */}
+            <div
+              onClick={() => handleInstantFeed('medizin')}
+              className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm active:scale-[0.98] transition-all cursor-pointer flex items-center justify-between"
+            >
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 text-2xl bg-rose-100 dark:bg-rose-950/60 rounded-2xl flex items-center justify-center">
+                  💊
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                      Medizin
+                    </h2>
+                    <span className="text-[10px] font-semibold text-rose-500 bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded-md">
+                      Luna
+                    </span>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+                        medizinStats.count > 0
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                          : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                      }`}
+                    >
+                      {medizinStats.count > 0 ? `${medizinStats.count}x gegeben` : 'Noch nicht'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {medizinStats.last
+                      ? `Zuletzt ${medizinStats.timeStr} Uhr von ${medizinStats.last.user_name}`
+                      : 'Heute noch nicht'}
+                  </p>
+                </div>
+              </div>
+              <button className="w-9 h-9 rounded-full bg-rose-500 text-white flex items-center justify-center font-bold shadow-sm">
                 <Plus className="w-4 h-4" />
               </button>
             </div>

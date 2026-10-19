@@ -1,4 +1,4 @@
-export type FeedingType = 'nass' | 'trocken' | 'leckerli' | 'klo';
+export type FeedingType = 'nass' | 'trocken' | 'leckerli' | 'klo' | 'medizin';
 
 // All 6 members with their 2-digit PINs
 export const USER_PINS: Record<string, string> = {
