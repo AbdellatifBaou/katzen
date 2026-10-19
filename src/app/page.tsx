@@ -14,7 +14,7 @@ import {
   calculateSettlements,
 } from '@/lib/expenseStore';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { format, isToday, parseISO, differenceInDays, addMonths, subMonths } from 'date-fns';
+import { format, isToday, isYesterday, parseISO, differenceInDays, addMonths, subMonths } from 'date-fns';
 import { de } from 'date-fns/locale';
 import confetti from 'canvas-confetti';
 import { playMeowSound } from '@/lib/sound';
@@ -697,24 +697,34 @@ export default function SimpleCatFeeder() {
               </button>
             </div>
 
-            {/* TODAY'S TIMELINE */}
+            {/* 7-DAY TIMELINE */}
             <div className="pt-2">
               <div className="flex items-center justify-between mb-2 px-1">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Heute ({todayFeedings.length})
+                  Verlauf (7 Tage)
                 </h3>
+                <span className="text-xs text-slate-400 font-medium">
+                  {feedings.length} {feedings.length === 1 ? 'Eintrag' : 'Einträge'}
+                </span>
               </div>
 
-              {todayFeedings.length === 0 ? (
+              {feedings.length === 0 ? (
                 <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 text-center border border-slate-200 dark:border-slate-800 text-slate-400 text-xs">
-                  Heute noch nichts eingetragen.
+                  In den letzten 7 Tagen noch nichts eingetragen.
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {todayFeedings.map((item) => {
+                  {feedings.map((item) => {
                     let time = '';
                     try {
-                      time = format(parseISO(item.created_at), 'HH:mm', { locale: de });
+                      const itemDate = parseISO(item.created_at);
+                      if (isToday(itemDate)) {
+                        time = `Heute, ${format(itemDate, 'HH:mm', { locale: de })} Uhr`;
+                      } else if (isYesterday(itemDate)) {
+                        time = `Gestern, ${format(itemDate, 'HH:mm', { locale: de })} Uhr`;
+                      } else {
+                        time = `${format(itemDate, 'EEE, d. MMM · HH:mm', { locale: de })} Uhr`;
+                      }
                     } catch {
                       time = '';
                     }
@@ -734,7 +744,7 @@ export default function SimpleCatFeeder() {
                                 {item.user_name}
                               </span>
                             </div>
-                            <span className="text-[11px] text-slate-400">{time} Uhr</span>
+                            <span className="text-[11px] text-slate-400">{time}</span>
                           </div>
                         </div>
 

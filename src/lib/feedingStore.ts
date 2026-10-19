@@ -10,7 +10,7 @@ export async function fetchFeedings(): Promise<FeedingLog[]> {
         .from('feedings')
         .select('id, created_at, user_name, type')
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(100);
 
       if (!error && data) {
         return data as FeedingLog[];
