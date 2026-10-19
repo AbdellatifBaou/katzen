@@ -154,15 +154,15 @@ export default function SimpleCatFeeder() {
   const loadData = useCallback(async () => {
     const feedData = await fetchFeedings();
     const now = new Date();
-    const last7DaysData = feedData.filter((item) => {
+    const last3DaysData = feedData.filter((item) => {
       try {
         const itemDate = parseISO(item.created_at);
-        return differenceInDays(now, itemDate) < 7;
+        return differenceInDays(now, itemDate) < 3;
       } catch {
         return false;
       }
     });
-    setFeedings(last7DaysData);
+    setFeedings(last3DaysData);
 
     const expData = await fetchExpenses();
     setExpenses(expData);
@@ -697,11 +697,11 @@ export default function SimpleCatFeeder() {
               </button>
             </div>
 
-            {/* 7-DAY TIMELINE */}
+            {/* 3-DAY TIMELINE */}
             <div className="pt-2">
               <div className="flex items-center justify-between mb-2 px-1">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Verlauf (7 Tage)
+                  Verlauf (3 Tage)
                 </h3>
                 <span className="text-xs text-slate-400 font-medium">
                   {feedings.length} {feedings.length === 1 ? 'Eintrag' : 'Einträge'}
@@ -710,7 +710,7 @@ export default function SimpleCatFeeder() {
 
               {feedings.length === 0 ? (
                 <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 text-center border border-slate-200 dark:border-slate-800 text-slate-400 text-xs">
-                  In den letzten 7 Tagen noch nichts eingetragen.
+                  In den letzten 3 Tagen noch nichts eingetragen.
                 </div>
               ) : (
                 <div className="space-y-2">
