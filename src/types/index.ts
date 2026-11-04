@@ -25,6 +25,12 @@ export interface DebtSettlement {
   paid_at?: string;
 }
 
+export interface OpenSettlementSummary extends DebtSettlement {
+  monthLabel: string;
+  isPastMonth: boolean;
+  isCurrentMonth: boolean;
+}
+
 export interface SettlementConfirmation {
   id: string;
   created_at: string;

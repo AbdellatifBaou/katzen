@@ -1,6 +1,8 @@
-import { Expense, UserBalance, DebtSettlement, SettlementConfirmation } from '@/types';
+import { Expense, UserBalance, DebtSettlement, SettlementConfirmation, OpenSettlementSummary } from '@/types';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { EXPENSE_USERS } from './constants';
+import { format, parseISO } from 'date-fns';
+import { de } from 'date-fns/locale';
 
 const LOCAL_EXPENSES_KEY = 'katzen_expenses_v1';
 const LOCAL_SETTLEMENTS_KEY = 'katzen_settlements_v1';
@@ -302,4 +304,68 @@ export function calculateSettlements(
   }
 
   return { total, perPerson, balances, openSettlements, paidSettlements };
+}
+
+// Calculate open settlements across ALL months (highlighting past months and current month)
+export function getAllOpenSettlements(
+  expenses: Expense[],
+  confirmedSettlements: SettlementConfirmation[] = [],
+  referenceDate: Date = new Date()
+): OpenSettlementSummary[] {
+  const currentRealMonthKey = format(referenceDate, 'yyyy-MM');
+
+  // Collect all distinct months from expenses
+  const monthSet = new Set<string>();
+  for (const exp of expenses) {
+    try {
+      const m = format(parseISO(exp.created_at), 'yyyy-MM');
+      if (m) monthSet.add(m);
+    } catch {
+      // ignore
+    }
+  }
+
+  // Sort months chronologically (earliest first)
+  const sortedMonths = Array.from(monthSet).sort();
+
+  const allOpen: OpenSettlementSummary[] = [];
+
+  for (const monthKey of sortedMonths) {
+    const monthExpenses = expenses.filter((e) => {
+      try {
+        return format(parseISO(e.created_at), 'yyyy-MM') === monthKey;
+      } catch {
+        return false;
+      }
+    });
+
+    if (monthExpenses.length === 0) continue;
+
+    const { openSettlements } = calculateSettlements(
+      monthExpenses,
+      monthKey,
+      confirmedSettlements
+    );
+
+    let monthLabel = monthKey;
+    try {
+      monthLabel = format(parseISO(`${monthKey}-01T00:00:00`), 'MMMM yyyy', { locale: de });
+    } catch {
+      monthLabel = monthKey;
+    }
+
+    const isPastMonth = monthKey < currentRealMonthKey;
+    const isCurrentMonth = monthKey === currentRealMonthKey;
+
+    for (const item of openSettlements) {
+      allOpen.push({
+        ...item,
+        monthLabel,
+        isPastMonth,
+        isCurrentMonth,
+      });
+    }
+  }
+
+  return allOpen;
 }

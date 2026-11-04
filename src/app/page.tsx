@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { FeedingLog, FeedingType, Expense, SettlementConfirmation } from '@/types';
 import { USERS, EXPENSE_USERS, CAT_NAMES, USER_PINS } from '@/lib/constants';
 import { fetchFeedings, addFeeding, removeFeeding } from '@/lib/feedingStore';
@@ -12,6 +12,7 @@ import {
   confirmSettlementPayment,
   removeSettlementConfirmation,
   calculateSettlements,
+  getAllOpenSettlements,
 } from '@/lib/expenseStore';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { format, isToday, isYesterday, parseISO, differenceInDays, addMonths, subMonths } from 'date-fns';
@@ -37,6 +38,8 @@ import {
   User,
   Delete,
   ShieldCheck,
+  Bell,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function SimpleCatFeeder() {
@@ -341,16 +344,28 @@ export default function SimpleCatFeeder() {
   // Confirm / Undo Settlement Payment
   const currentMonthKey = format(selectedMonthDate, 'yyyy-MM');
 
-  const handleConfirmPayment = async (fromUser: string, toUser: string, amount: number) => {
+  const handleConfirmPayment = async (
+    fromUser: string,
+    toUser: string,
+    amount: number,
+    targetMonth: string = currentMonthKey
+  ) => {
     if (!currentUser) return;
     if (currentUser !== toUser) {
       alert(`Nur ${toUser} (Empfänger) darf bestätigen, dass das Geld angekommen ist.`);
       return;
     }
 
-    if (confirm(`Bestätigen, dass du (${toUser}) ${amount.toFixed(2)} € von ${fromUser} erhalten hast?`)) {
+    let monthDisplay = targetMonth;
+    try {
+      monthDisplay = format(parseISO(`${targetMonth}-01T00:00:00`), 'MMMM yyyy', { locale: de });
+    } catch {
+      monthDisplay = targetMonth;
+    }
+
+    if (confirm(`Bestätigen, dass du (${toUser}) ${amount.toFixed(2)} € von ${fromUser} für ${monthDisplay} erhalten hast?`)) {
       const conf = await confirmSettlementPayment({
-        month: currentMonthKey,
+        month: targetMonth,
         from_user: fromUser,
         to_user: toUser,
         amount,
@@ -376,6 +391,42 @@ export default function SimpleCatFeeder() {
       setSettlements((prev) => prev.filter((s) => s.id !== confItem.id));
     }
   };
+
+  const handleJumpToMonth = (monthKey: string) => {
+    try {
+      const [y, m] = monthKey.split('-').map(Number);
+      setSelectedMonthDate(new Date(y, m - 1, 1));
+    } catch {
+      // ignore
+    }
+  };
+
+  // Open settlements across ALL months (past months + current)
+  const allOpenSettlements = useMemo(() => {
+    return getAllOpenSettlements(expenses, settlements);
+  }, [expenses, settlements]);
+
+  const myOpenDebts = useMemo(() => {
+    if (!currentUser) return [];
+    return allOpenSettlements.filter((s) => s.from === currentUser);
+  }, [allOpenSettlements, currentUser]);
+
+  const myTotalDebt = useMemo(() => {
+    return myOpenDebts.reduce((sum, s) => sum + s.amount, 0);
+  }, [myOpenDebts]);
+
+  const myOpenCredits = useMemo(() => {
+    if (!currentUser) return [];
+    return allOpenSettlements.filter((s) => s.to === currentUser);
+  }, [allOpenSettlements, currentUser]);
+
+  const myTotalCredit = useMemo(() => {
+    return myOpenCredits.reduce((sum, s) => sum + s.amount, 0);
+  }, [myOpenCredits]);
+
+  const pastMonthsOpen = useMemo(() => {
+    return allOpenSettlements.filter((s) => s.isPastMonth);
+  }, [allOpenSettlements]);
 
   // Filter expenses by selected month
   const selectedMonthExpenses = expenses.filter((e) => {
@@ -548,7 +599,19 @@ export default function SimpleCatFeeder() {
                 : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
-            <span>💰</span> Kasse
+            <span>💰</span>
+            <span>Kasse</span>
+            {myOpenDebts.length > 0 ? (
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-black bg-rose-500 text-white shadow-xs animate-pulse">
+                {myOpenDebts.length}
+              </span>
+            ) : myOpenCredits.length > 0 ? (
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-black bg-emerald-500 text-white shadow-xs">
+                {myOpenCredits.length}
+              </span>
+            ) : allOpenSettlements.length > 0 ? (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+            ) : null}
           </button>
         </div>
       </header>
@@ -818,6 +881,202 @@ export default function SimpleCatFeeder() {
         {/* ================= TAB 2: KATZEN-KASSE & AUSGABEN ================= */}
         {activeTab === 'expenses' && (
           <div className="space-y-4 animate-fadeIn">
+            {/* NOTIFICATION: OFFENE ZAHLUNGEN (AUS VORMONATEN & AKTUELL) */}
+            {allOpenSettlements.length > 0 && (
+              <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/30 rounded-3xl p-4 border border-amber-300 dark:border-amber-800/70 shadow-sm space-y-3 animate-fadeIn">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-xs">
+                      <Bell className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-wider text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                        <span>Zahlungserinnerung</span>
+                        {pastMonthsOpen.length > 0 && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-rose-500 text-white">
+                            Vormonat!
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300 font-medium">
+                        {pastMonthsOpen.length > 0
+                          ? `${pastMonthsOpen.length} offene ${pastMonthsOpen.length === 1 ? 'Zahlung' : 'Zahlungen'} aus Vormonaten`
+                          : 'Offene Zahlungen im Überblick'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-200/90 dark:bg-amber-900 text-amber-950 dark:text-amber-100">
+                    {allOpenSettlements.length} offen
+                  </span>
+                </div>
+
+                {/* PERSONAL ALERT: WHAT CURRENT USER HAS TO PAY */}
+                {myOpenDebts.length > 0 && (
+                  <div className="bg-white/90 dark:bg-slate-900/90 border border-rose-300 dark:border-rose-900/70 rounded-2xl p-3 space-y-2 shadow-xs">
+                    <div className="flex items-center justify-between text-xs font-extrabold text-rose-700 dark:text-rose-300">
+                      <span className="flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                        Du musst noch zahlen:
+                      </span>
+                      <span className="text-sm font-black text-rose-600 dark:text-rose-400">
+                        {myTotalDebt.toFixed(2)} €
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {myOpenDebts.map((s) => (
+                        <div
+                          key={s.id}
+                          className="flex items-center justify-between p-2 rounded-xl bg-rose-50/60 dark:bg-rose-950/30 text-xs"
+                        >
+                          <div>
+                            <span className="font-bold text-slate-800 dark:text-slate-100">
+                              {s.amount.toFixed(2)} € an{' '}
+                              <span className="text-rose-600 dark:text-rose-400 font-black">
+                                {s.to}
+                              </span>
+                            </span>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 block">
+                              {s.monthLabel}
+                            </span>
+                          </div>
+
+                          {s.month !== currentMonthKey && (
+                            <button
+                              onClick={() => handleJumpToMonth(s.month)}
+                              className="px-2 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/60 hover:bg-rose-200 text-rose-800 dark:text-rose-200 font-bold text-[11px] flex items-center gap-1 active:scale-95 transition-all"
+                            >
+                              <span>Zum Monat</span>
+                              <ChevronRight className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* PERSONAL ALERT: WHAT CURRENT USER IS OWED */}
+                {myOpenCredits.length > 0 && (
+                  <div className="bg-white/90 dark:bg-slate-900/90 border border-emerald-300 dark:border-emerald-900/70 rounded-2xl p-3 space-y-2 shadow-xs">
+                    <div className="flex items-center justify-between text-xs font-extrabold text-emerald-700 dark:text-emerald-300">
+                      <span className="flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        Du bekommst noch Geld:
+                      </span>
+                      <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">
+                        {myTotalCredit.toFixed(2)} €
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {myOpenCredits.map((s) => (
+                        <div
+                          key={s.id}
+                          className="flex items-center justify-between p-2 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/30 text-xs gap-2"
+                        >
+                          <div>
+                            <span className="font-bold text-slate-800 dark:text-slate-100">
+                              {s.amount.toFixed(2)} € von{' '}
+                              <span className="text-emerald-600 dark:text-emerald-400 font-black">
+                                {s.from}
+                              </span>
+                            </span>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 block">
+                              {s.monthLabel}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => handleConfirmPayment(s.from, s.to, s.amount, s.month)}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 shadow-xs active:scale-95 transition-all"
+                              title="Als erhalten bestätigen"
+                            >
+                              <Check className="w-3 h-3" />
+                              <span>Erhalten</span>
+                            </button>
+                            {s.month !== currentMonthKey && (
+                              <button
+                                onClick={() => handleJumpToMonth(s.month)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                                title="Zu diesem Monat springen"
+                              >
+                                <ChevronRight className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ALL OPEN SETTLEMENTS LIST (TRANSPARENCY FOR EVERYONE) */}
+                <div className="pt-1 space-y-1.5">
+                  <p className="text-[11px] font-bold text-amber-900/80 dark:text-amber-200/80 px-1">
+                    Wer wem was schuldet:
+                  </p>
+                  <div className="space-y-1.5">
+                    {allOpenSettlements.map((s) => {
+                      const isMyDebt = currentUser === s.from;
+                      const isMyCredit = currentUser === s.to;
+                      const canSettle = isMyCredit;
+
+                      return (
+                        <div
+                          key={s.id}
+                          className="flex items-center justify-between p-2.5 rounded-xl bg-white/80 dark:bg-slate-900/80 border border-amber-200/50 dark:border-amber-800/40 text-xs gap-2"
+                        >
+                          <div>
+                            <div className="flex items-center gap-1.5 font-bold">
+                              <span className={isMyDebt ? 'text-rose-600 underline font-black' : 'text-slate-800 dark:text-slate-200'}>
+                                {s.from} {isMyDebt ? '(Du)' : ''}
+                              </span>
+                              <ArrowRight className="w-3 h-3 text-slate-400" />
+                              <span className={isMyCredit ? 'text-emerald-600 underline font-black' : 'text-slate-800 dark:text-slate-200'}>
+                                {s.to} {isMyCredit ? '(Du)' : ''}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="font-black text-slate-900 dark:text-white">
+                                {s.amount.toFixed(2)} €
+                              </span>
+                              <span className="text-[10px] text-amber-800 dark:text-amber-400 font-semibold bg-amber-100 dark:bg-amber-950 px-1.5 py-0.2 rounded">
+                                {s.monthLabel}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            {canSettle ? (
+                              <button
+                                onClick={() => handleConfirmPayment(s.from, s.to, s.amount, s.month)}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 shadow-xs active:scale-95 transition-all"
+                                title="Als erhalten bestätigen"
+                              >
+                                <Check className="w-3 h-3" />
+                                <span>Erhalten</span>
+                              </button>
+                            ) : s.month !== currentMonthKey ? (
+                              <button
+                                onClick={() => handleJumpToMonth(s.month)}
+                                className="text-[11px] font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center gap-0.5"
+                                title="Zu diesem Monat springen"
+                              >
+                                <span>Monat</span>
+                                <ChevronRight className="w-3 h-3" />
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* MONTH SWITCHER HEADER */}
             <div className="flex items-center justify-between bg-white dark:bg-slate-900 p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
               <button
