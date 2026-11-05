@@ -46,3 +46,10 @@ export interface UserBalance {
   share: number;
   balance: number; // positive = gets back, negative = owes
 }
+
+export interface NoticeMessage {
+  id: string;
+  created_at: string;
+  user_name: string;
+  message: string;
+}

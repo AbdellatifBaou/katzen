@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { FeedingLog, FeedingType, Expense, SettlementConfirmation } from '@/types';
+import { FeedingLog, FeedingType, Expense, SettlementConfirmation, NoticeMessage } from '@/types';
 import { USERS, EXPENSE_USERS, CAT_NAMES, USER_PINS } from '@/lib/constants';
 import { fetchFeedings, addFeeding, removeFeeding } from '@/lib/feedingStore';
+import { fetchLatestNotice, postNotice, deleteNotice } from '@/lib/noticeStore';
 import {
   fetchExpenses,
   addExpense,
@@ -40,6 +41,7 @@ import {
   ShieldCheck,
   Bell,
   AlertTriangle,
+  Edit3,
 } from 'lucide-react';
 
 export default function SimpleCatFeeder() {
@@ -56,6 +58,12 @@ export default function SimpleCatFeeder() {
   const [feedings, setFeedings] = useState<FeedingLog[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // Bulletin / Notice banner state
+  const [latestNotice, setLatestNotice] = useState<NoticeMessage | null>(null);
+  const [isNoticeModalOpen, setIsNoticeModalOpen] = useState(false);
+  const [noticeInput, setNoticeInput] = useState('');
+  const [isNoticeSubmitting, setIsNoticeSubmitting] = useState(false);
 
   // Expenses & Settlement state
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -167,6 +175,9 @@ export default function SimpleCatFeeder() {
     });
     setFeedings(last3DaysData);
 
+    const noticeData = await fetchLatestNotice();
+    setLatestNotice(noticeData);
+
     const expData = await fetchExpenses();
     setExpenses(expData);
 
@@ -185,10 +196,20 @@ export default function SimpleCatFeeder() {
           { event: '*', schema: 'public', table: 'feedings' },
           (payload) => {
             if (payload.eventType === 'INSERT') {
-              const newRecord = payload.new as FeedingLog;
-              setFeedings((prev) => [newRecord, ...prev.filter((i) => i.id !== newRecord.id)]);
+              const newRecord = payload.new as any;
+              if (newRecord.type === 'notice') {
+                setLatestNotice({
+                  id: newRecord.id,
+                  created_at: newRecord.created_at,
+                  user_name: newRecord.user_name,
+                  message: newRecord.notes || '',
+                });
+              } else {
+                setFeedings((prev) => [newRecord as FeedingLog, ...prev.filter((i) => i.id !== newRecord.id)]);
+              }
             } else if (payload.eventType === 'DELETE') {
               const delId = (payload.old as { id: string }).id;
+              setLatestNotice((prev) => (prev?.id === delId ? null : prev));
               setFeedings((prev) => prev.filter((i) => i.id !== delId));
             }
           }
@@ -328,6 +349,41 @@ export default function SimpleCatFeeder() {
     }
   };
 
+  // Submit / Delete Notice
+  const handleSaveNotice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !noticeInput.trim() || isNoticeSubmitting) return;
+
+    try {
+      setIsNoticeSubmitting(true);
+      const saved = await postNotice(currentUser, noticeInput);
+      setLatestNotice(saved);
+      setIsNoticeModalOpen(false);
+      setNoticeInput('');
+
+      if (soundEnabled) {
+        playMeowSound();
+      }
+      confetti({
+        particleCount: 30,
+        spread: 50,
+        origin: { y: 0.7 },
+      });
+    } finally {
+      setIsNoticeSubmitting(false);
+    }
+  };
+
+  const handleDeleteNotice = async () => {
+    if (!currentUser) return;
+    if (confirm('Notiz für die WG löschen?')) {
+      await deleteNotice(latestNotice?.id);
+      setLatestNotice(null);
+      setIsNoticeModalOpen(false);
+      setNoticeInput('');
+    }
+  };
+
   // Only allowed to delete your own expense
   const handleDeleteExpense = async (exp: Expense) => {
     if (!currentUser) return;
@@ -464,6 +520,22 @@ export default function SimpleCatFeeder() {
     if (type === 'medizin') return '💊';
     return '🐾';
   };
+
+  let noticeTimeStr = '';
+  if (latestNotice) {
+    try {
+      const d = parseISO(latestNotice.created_at);
+      if (isToday(d)) {
+        noticeTimeStr = `Heute, ${format(d, 'HH:mm', { locale: de })} Uhr`;
+      } else if (isYesterday(d)) {
+        noticeTimeStr = `Gestern, ${format(d, 'HH:mm', { locale: de })} Uhr`;
+      } else {
+        noticeTimeStr = `${format(d, 'd. MMM, HH:mm', { locale: de })} Uhr`;
+      }
+    } catch {
+      noticeTimeStr = '';
+    }
+  }
 
   // ================= 1. PIN LOGIN SCREEN =================
   if (isAuthLoading) {
@@ -621,6 +693,68 @@ export default function SimpleCatFeeder() {
         {/* ================= TAB 1: FÜTTERUNG & TOILETTE ================= */}
         {activeTab === 'feeding' && (
           <div className="space-y-3 animate-fadeIn">
+            {/* WG NOTIZ / PINNWAND BANNER */}
+            {latestNotice ? (
+              <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/30 border border-amber-300/80 dark:border-amber-800/80 rounded-2xl p-3.5 shadow-xs space-y-1.5 transition-all">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900 dark:text-amber-200">
+                    <span className="text-sm">📌</span>
+                    <span>Notiz von</span>
+                    <span className="text-orange-600 dark:text-orange-400 font-black">
+                      {latestNotice.user_name}
+                    </span>
+                    {noticeTimeStr && (
+                      <span className="text-[10px] text-slate-400 font-normal">
+                        • {noticeTimeStr}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        setNoticeInput(latestNotice.message);
+                        setIsNoticeModalOpen(true);
+                      }}
+                      className="px-2 py-1 rounded-lg hover:bg-amber-100/80 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 text-xs font-bold flex items-center gap-1 transition-all active:scale-95"
+                      title="Notiz ändern / neu schreiben"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      <span className="text-[11px]">Ändern</span>
+                    </button>
+                    <button
+                      onClick={handleDeleteNotice}
+                      className="p-1 rounded-lg hover:bg-rose-100/80 dark:hover:bg-rose-950/60 text-slate-400 hover:text-rose-600 transition-all active:scale-95"
+                      title="Notiz löschen"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-wrap break-words">
+                  {latestNotice.message}
+                </p>
+              </div>
+            ) : (
+              <div
+                onClick={() => {
+                  setNoticeInput('');
+                  setIsNoticeModalOpen(true);
+                }}
+                className="bg-white/70 dark:bg-slate-900/70 border border-dashed border-slate-300 dark:border-slate-800 hover:border-orange-400 rounded-2xl p-2.5 px-3.5 flex items-center justify-between cursor-pointer active:scale-[0.99] transition-all group shadow-2xs"
+              >
+                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                  <span className="text-sm group-hover:scale-110 transition-transform">💬</span>
+                  <span className="font-medium">Keine WG-Nachricht hinterlegt</span>
+                </div>
+                <span className="text-[11px] font-bold text-orange-600 dark:text-orange-400 flex items-center gap-1">
+                  <Plus className="w-3 h-3" />
+                  <span>Notiz schreiben</span>
+                </span>
+              </div>
+            )}
+
             {/* 1. NASSFUTTER */}
             <div
               onClick={() => handleInstantFeed('nass')}
@@ -1405,6 +1539,78 @@ export default function SimpleCatFeeder() {
               >
                 {expenseSubmitting ? 'Speichern...' : 'Speichern'}
               </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: WG-NOTIZ SCHREIBEN / ÄNDERN ================= */}
+      {isNoticeModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl p-5 space-y-4 shadow-2xl border-t sm:border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">📌</span>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    Notiz für die WG
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Wird oben im Futter & Klo Tab für alle angezeigt
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsNoticeModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 hover:text-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveNotice} className="space-y-3.5">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                    Nachricht
+                  </label>
+                  <span className="text-[11px] text-orange-600 dark:text-orange-400 font-semibold">
+                    Von {currentUser}
+                  </span>
+                </div>
+                <textarea
+                  rows={3}
+                  required
+                  autoFocus
+                  placeholder="z. B. Luna hat schon Medizin bekommen, bitte heute Abend nur Trockenfutter..."
+                  value={noticeInput}
+                  onChange={(e) => setNoticeInput(e.target.value)}
+                  className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none leading-relaxed"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                {latestNotice && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteNotice}
+                    className="py-3 px-3.5 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center gap-1.5 active:scale-95 transition-all"
+                    title="Notiz entfernen"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Löschen</span>
+                  </button>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isNoticeSubmitting || !noticeInput.trim()}
+                  className="flex-1 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs rounded-xl shadow-md active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isNoticeSubmitting ? 'Wird gespeichert...' : 'Notiz posten'}</span>
+                </button>
+              </div>
             </form>
           </div>
         </div>

@@ -9,6 +9,7 @@ export async function fetchFeedings(): Promise<FeedingLog[]> {
       const { data, error } = await supabase
         .from('feedings')
         .select('id, created_at, user_name, type')
+        .neq('type', 'notice')
         .order('created_at', { ascending: false })
         .limit(100);
 
