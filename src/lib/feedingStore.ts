@@ -95,3 +95,28 @@ export async function removeFeeding(id: string): Promise<void> {
     }
   }
 }
+
+export async function updateFeedingTime(id: string, newCreatedAt: string): Promise<void> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase
+        .from('feedings')
+        .update({ created_at: newCreatedAt })
+        .eq('id', id);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const current = await fetchFeedings();
+      const updated = current.map((item) =>
+        item.id === id ? { ...item, created_at: newCreatedAt } : item
+      );
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(updated));
+    } catch (e) {
+      console.error(e);
+    }
+  }
+}

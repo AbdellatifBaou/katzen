@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { FeedingLog, FeedingType, Expense, SettlementConfirmation, NoticeMessage } from '@/types';
 import { USERS, EXPENSE_USERS, CAT_NAMES, USER_PINS } from '@/lib/constants';
-import { fetchFeedings, addFeeding, removeFeeding } from '@/lib/feedingStore';
+import { fetchFeedings, addFeeding, removeFeeding, updateFeedingTime } from '@/lib/feedingStore';
 import { fetchLatestNotice, postNotice, deleteNotice } from '@/lib/noticeStore';
 import {
   fetchExpenses,
@@ -42,6 +42,7 @@ import {
   Bell,
   AlertTriangle,
   Edit3,
+  Clock,
 } from 'lucide-react';
 
 export default function SimpleCatFeeder() {
@@ -58,6 +59,9 @@ export default function SimpleCatFeeder() {
   const [feedings, setFeedings] = useState<FeedingLog[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [editingFeeding, setEditingFeeding] = useState<FeedingLog | null>(null);
+  const [editFeedingDateTime, setEditFeedingDateTime] = useState('');
+  const [isSavingFeedingTime, setIsSavingFeedingTime] = useState(false);
 
   // Bulletin / Notice banner state
   const [latestNotice, setLatestNotice] = useState<NoticeMessage | null>(null);
@@ -211,6 +215,22 @@ export default function SimpleCatFeeder() {
               const delId = (payload.old as { id: string }).id;
               setLatestNotice((prev) => (prev?.id === delId ? null : prev));
               setFeedings((prev) => prev.filter((i) => i.id !== delId));
+            } else if (payload.eventType === 'UPDATE') {
+              const updated = payload.new as any;
+              if (updated.type === 'notice') {
+                setLatestNotice({
+                  id: updated.id,
+                  created_at: updated.created_at,
+                  user_name: updated.user_name,
+                  message: updated.notes || '',
+                });
+              } else {
+                setFeedings((prev) =>
+                  prev
+                    .map((item) => (item.id === updated.id ? (updated as FeedingLog) : item))
+                    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                );
+              }
             }
           }
         )
@@ -312,6 +332,43 @@ export default function SimpleCatFeeder() {
     if (confirm('Eintrag löschen?')) {
       await removeFeeding(item.id);
       setFeedings((prev) => prev.filter((i) => i.id !== item.id));
+    }
+  };
+
+  // Edit feeding time
+  const handleOpenEditTime = (item: FeedingLog) => {
+    if (!currentUser) return;
+    if (item.user_name !== currentUser) {
+      alert(`Du kannst nur deine eigenen Einträge bearbeiten (${item.user_name}).`);
+      return;
+    }
+    setEditingFeeding(item);
+    try {
+      setEditFeedingDateTime(format(parseISO(item.created_at), "yyyy-MM-dd'T'HH:mm"));
+    } catch {
+      setEditFeedingDateTime(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+    }
+  };
+
+  const handleSaveFeedingTime = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingFeeding || !editFeedingDateTime || isSavingFeedingTime) return;
+
+    try {
+      setIsSavingFeedingTime(true);
+      const newIso = new Date(editFeedingDateTime).toISOString();
+      await updateFeedingTime(editingFeeding.id, newIso);
+      setFeedings((prev) =>
+        prev
+          .map((f) => (f.id === editingFeeding.id ? { ...f, created_at: newIso } : f))
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      );
+      setEditingFeeding(null);
+    } catch (err) {
+      console.error(err);
+      alert('Fehler beim Speichern der Uhrzeit.');
+    } finally {
+      setIsSavingFeedingTime(false);
     }
   };
 
@@ -462,27 +519,30 @@ export default function SimpleCatFeeder() {
     return getAllOpenSettlements(expenses, settlements);
   }, [expenses, settlements]);
 
-  const myOpenDebts = useMemo(() => {
-    if (!currentUser) return [];
-    return allOpenSettlements.filter((s) => s.from === currentUser);
-  }, [allOpenSettlements, currentUser]);
-
-  const myTotalDebt = useMemo(() => {
-    return myOpenDebts.reduce((sum, s) => sum + s.amount, 0);
-  }, [myOpenDebts]);
-
-  const myOpenCredits = useMemo(() => {
-    if (!currentUser) return [];
-    return allOpenSettlements.filter((s) => s.to === currentUser);
-  }, [allOpenSettlements, currentUser]);
-
-  const myTotalCredit = useMemo(() => {
-    return myOpenCredits.reduce((sum, s) => sum + s.amount, 0);
-  }, [myOpenCredits]);
-
+  // ONLY past months open settlements (user requested: "es muss nur zeigen von letzten Monate")
   const pastMonthsOpen = useMemo(() => {
     return allOpenSettlements.filter((s) => s.isPastMonth);
   }, [allOpenSettlements]);
+
+  // What currentUser personally owes from past months
+  const myPastDebts = useMemo(() => {
+    if (!currentUser) return [];
+    return pastMonthsOpen.filter((s) => s.from === currentUser);
+  }, [pastMonthsOpen, currentUser]);
+
+  const myTotalPastDebt = useMemo(() => {
+    return myPastDebts.reduce((sum, s) => sum + s.amount, 0);
+  }, [myPastDebts]);
+
+  // What currentUser personally is owed from past months
+  const myPastCredits = useMemo(() => {
+    if (!currentUser) return [];
+    return pastMonthsOpen.filter((s) => s.to === currentUser);
+  }, [pastMonthsOpen, currentUser]);
+
+  const myTotalPastCredit = useMemo(() => {
+    return myPastCredits.reduce((sum, s) => sum + s.amount, 0);
+  }, [myPastCredits]);
 
   // Filter expenses by selected month
   const selectedMonthExpenses = expenses.filter((e) => {
@@ -673,16 +733,14 @@ export default function SimpleCatFeeder() {
           >
             <span>💰</span>
             <span>Kasse</span>
-            {myOpenDebts.length > 0 ? (
+            {myPastDebts.length > 0 ? (
               <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-black bg-rose-500 text-white shadow-xs animate-pulse">
-                {myOpenDebts.length}
+                {myPastDebts.length}
               </span>
-            ) : myOpenCredits.length > 0 ? (
+            ) : myPastCredits.length > 0 ? (
               <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-black bg-emerald-500 text-white shadow-xs">
-                {myOpenCredits.length}
+                {myPastCredits.length}
               </span>
-            ) : allOpenSettlements.length > 0 ? (
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
             ) : null}
           </button>
         </div>
@@ -989,15 +1047,24 @@ export default function SimpleCatFeeder() {
                           </div>
                         </div>
 
-                        {/* Trash Button ONLY for creator */}
+                        {/* Actions ONLY for creator */}
                         {isMyEntry ? (
-                          <button
-                            onClick={() => handleDeleteFeeding(item)}
-                            className="p-2 text-slate-300 hover:text-rose-500 active:scale-90 transition-all"
-                            title="Löschen"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              onClick={() => handleOpenEditTime(item)}
+                              className="p-2 text-slate-400 hover:text-orange-500 active:scale-90 transition-all"
+                              title="Uhrzeit ändern"
+                            >
+                              <Clock className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteFeeding(item)}
+                              className="p-2 text-slate-300 hover:text-rose-500 active:scale-90 transition-all"
+                              title="Löschen"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         ) : (
                           <div className="p-2 opacity-20">
                             <Lock className="w-3.5 h-3.5 text-slate-400" />
@@ -1015,8 +1082,8 @@ export default function SimpleCatFeeder() {
         {/* ================= TAB 2: KATZEN-KASSE & AUSGABEN ================= */}
         {activeTab === 'expenses' && (
           <div className="space-y-4 animate-fadeIn">
-            {/* NOTIFICATION: OFFENE ZAHLUNGEN (AUS VORMONATEN & AKTUELL) */}
-            {allOpenSettlements.length > 0 && (
+            {/* NOTIFICATION: NUR OFFENE ZAHLUNGEN AUS VORMONATEN FÜR MICH */}
+            {(myPastDebts.length > 0 || myPastCredits.length > 0) && (
               <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/30 rounded-3xl p-4 border border-amber-300 dark:border-amber-800/70 shadow-sm space-y-3 animate-fadeIn">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
@@ -1024,28 +1091,23 @@ export default function SimpleCatFeeder() {
                       <Bell className="w-4 h-4" />
                     </div>
                     <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
-                        <span>Zahlungserinnerung</span>
-                        {pastMonthsOpen.length > 0 && (
-                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-rose-500 text-white">
-                            Vormonat!
-                          </span>
-                        )}
+                      <h3 className="text-xs font-black uppercase tracking-wider text-amber-900 dark:text-amber-200">
+                        Zahlungserinnerung (Vormonate)
                       </h3>
                       <p className="text-[11px] text-amber-800 dark:text-amber-300 font-medium">
-                        {pastMonthsOpen.length > 0
-                          ? `${pastMonthsOpen.length} offene ${pastMonthsOpen.length === 1 ? 'Zahlung' : 'Zahlungen'} aus Vormonaten`
-                          : 'Offene Zahlungen im Überblick'}
+                        {myPastDebts.length > 0
+                          ? `Du hast noch ${myPastDebts.length} offene ${myPastDebts.length === 1 ? 'Zahlung' : 'Zahlungen'}`
+                          : `Du erhältst noch Geld von ${myPastCredits.length} ${myPastCredits.length === 1 ? 'Person' : 'Personen'}`}
                       </p>
                     </div>
                   </div>
                   <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-200/90 dark:bg-amber-900 text-amber-950 dark:text-amber-100">
-                    {allOpenSettlements.length} offen
+                    {myPastDebts.length + myPastCredits.length} offen
                   </span>
                 </div>
 
-                {/* PERSONAL ALERT: WHAT CURRENT USER HAS TO PAY */}
-                {myOpenDebts.length > 0 && (
+                {/* WAS ICH NOCH AUS VORMONATEN ZAHLEN MUSS */}
+                {myPastDebts.length > 0 && (
                   <div className="bg-white/90 dark:bg-slate-900/90 border border-rose-300 dark:border-rose-900/70 rounded-2xl p-3 space-y-2 shadow-xs">
                     <div className="flex items-center justify-between text-xs font-extrabold text-rose-700 dark:text-rose-300">
                       <span className="flex items-center gap-1.5">
@@ -1053,12 +1115,12 @@ export default function SimpleCatFeeder() {
                         Du musst noch zahlen:
                       </span>
                       <span className="text-sm font-black text-rose-600 dark:text-rose-400">
-                        {myTotalDebt.toFixed(2)} €
+                        {myTotalPastDebt.toFixed(2)} €
                       </span>
                     </div>
 
                     <div className="space-y-1.5">
-                      {myOpenDebts.map((s) => (
+                      {myPastDebts.map((s) => (
                         <div
                           key={s.id}
                           className="flex items-center justify-between p-2 rounded-xl bg-rose-50/60 dark:bg-rose-950/30 text-xs"
@@ -1075,23 +1137,21 @@ export default function SimpleCatFeeder() {
                             </span>
                           </div>
 
-                          {s.month !== currentMonthKey && (
-                            <button
-                              onClick={() => handleJumpToMonth(s.month)}
-                              className="px-2 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/60 hover:bg-rose-200 text-rose-800 dark:text-rose-200 font-bold text-[11px] flex items-center gap-1 active:scale-95 transition-all"
-                            >
-                              <span>Zum Monat</span>
-                              <ChevronRight className="w-3 h-3" />
-                            </button>
-                          )}
+                          <button
+                            onClick={() => handleJumpToMonth(s.month)}
+                            className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/60 hover:bg-rose-200 text-rose-800 dark:text-rose-200 font-bold text-[11px] flex items-center gap-1 active:scale-95 transition-all"
+                          >
+                            <span>Zum Monat</span>
+                            <ChevronRight className="w-3 h-3" />
+                          </button>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* PERSONAL ALERT: WHAT CURRENT USER IS OWED */}
-                {myOpenCredits.length > 0 && (
+                {/* WAS ICH NOCH AUS VORMONATEN BEKOMME */}
+                {myPastCredits.length > 0 && (
                   <div className="bg-white/90 dark:bg-slate-900/90 border border-emerald-300 dark:border-emerald-900/70 rounded-2xl p-3 space-y-2 shadow-xs">
                     <div className="flex items-center justify-between text-xs font-extrabold text-emerald-700 dark:text-emerald-300">
                       <span className="flex items-center gap-1.5">
@@ -1099,12 +1159,12 @@ export default function SimpleCatFeeder() {
                         Du bekommst noch Geld:
                       </span>
                       <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">
-                        {myTotalCredit.toFixed(2)} €
+                        {myTotalPastCredit.toFixed(2)} €
                       </span>
                     </div>
 
                     <div className="space-y-1.5">
-                      {myOpenCredits.map((s) => (
+                      {myPastCredits.map((s) => (
                         <div
                           key={s.id}
                           className="flex items-center justify-between p-2 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/30 text-xs gap-2"
@@ -1130,84 +1190,19 @@ export default function SimpleCatFeeder() {
                               <Check className="w-3 h-3" />
                               <span>Erhalten</span>
                             </button>
-                            {s.month !== currentMonthKey && (
-                              <button
-                                onClick={() => handleJumpToMonth(s.month)}
-                                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                                title="Zu diesem Monat springen"
-                              >
-                                <ChevronRight className="w-4 h-4" />
-                              </button>
-                            )}
+                            <button
+                              onClick={() => handleJumpToMonth(s.month)}
+                              className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                              title="Zu diesem Monat springen"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
-
-                {/* ALL OPEN SETTLEMENTS LIST (TRANSPARENCY FOR EVERYONE) */}
-                <div className="pt-1 space-y-1.5">
-                  <p className="text-[11px] font-bold text-amber-900/80 dark:text-amber-200/80 px-1">
-                    Wer wem was schuldet:
-                  </p>
-                  <div className="space-y-1.5">
-                    {allOpenSettlements.map((s) => {
-                      const isMyDebt = currentUser === s.from;
-                      const isMyCredit = currentUser === s.to;
-                      const canSettle = isMyCredit;
-
-                      return (
-                        <div
-                          key={s.id}
-                          className="flex items-center justify-between p-2.5 rounded-xl bg-white/80 dark:bg-slate-900/80 border border-amber-200/50 dark:border-amber-800/40 text-xs gap-2"
-                        >
-                          <div>
-                            <div className="flex items-center gap-1.5 font-bold">
-                              <span className={isMyDebt ? 'text-rose-600 underline font-black' : 'text-slate-800 dark:text-slate-200'}>
-                                {s.from} {isMyDebt ? '(Du)' : ''}
-                              </span>
-                              <ArrowRight className="w-3 h-3 text-slate-400" />
-                              <span className={isMyCredit ? 'text-emerald-600 underline font-black' : 'text-slate-800 dark:text-slate-200'}>
-                                {s.to} {isMyCredit ? '(Du)' : ''}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="font-black text-slate-900 dark:text-white">
-                                {s.amount.toFixed(2)} €
-                              </span>
-                              <span className="text-[10px] text-amber-800 dark:text-amber-400 font-semibold bg-amber-100 dark:bg-amber-950 px-1.5 py-0.2 rounded">
-                                {s.monthLabel}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1">
-                            {canSettle ? (
-                              <button
-                                onClick={() => handleConfirmPayment(s.from, s.to, s.amount, s.month)}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center gap-1 shadow-xs active:scale-95 transition-all"
-                                title="Als erhalten bestätigen"
-                              >
-                                <Check className="w-3 h-3" />
-                                <span>Erhalten</span>
-                              </button>
-                            ) : s.month !== currentMonthKey ? (
-                              <button
-                                onClick={() => handleJumpToMonth(s.month)}
-                                className="text-[11px] font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center gap-0.5"
-                                title="Zu diesem Monat springen"
-                              >
-                                <span>Monat</span>
-                                <ChevronRight className="w-3 h-3" />
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
             )}
 
@@ -1609,6 +1604,66 @@ export default function SimpleCatFeeder() {
                 >
                   <Check className="w-4 h-4" />
                   <span>{isNoticeSubmitting ? 'Wird gespeichert...' : 'Notiz posten'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: UHRZEIT ÄNDERN (FUTTER & KLO) ================= */}
+      {editingFeeding && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl p-5 space-y-4 shadow-2xl border-t sm:border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">{getTypeIcon(editingFeeding.type)}</span>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    Uhrzeit anpassen
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {getTypeLabel(editingFeeding.type)} eingetragen von {editingFeeding.user_name}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingFeeding(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 hover:text-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveFeedingTime} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-300 block mb-1.5">
+                  Datum & Uhrzeit
+                </label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={editFeedingDateTime}
+                  onChange={(e) => setEditFeedingDateTime(e.target.value)}
+                  className="w-full text-sm font-bold px-3.5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingFeeding(null)}
+                  className="py-3 px-4 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 font-bold text-xs active:scale-95 transition-all"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingFeedingTime || !editFeedingDateTime}
+                  className="flex-1 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs rounded-xl shadow-md active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isSavingFeedingTime ? 'Wird gespeichert...' : 'Uhrzeit speichern'}</span>
                 </button>
               </div>
             </form>
